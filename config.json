@@ -1,0 +1,13 @@
+{
+  "default_classroom": "cs472",
+  "classrooms": {
+    "cs472": {
+      "organization": "CS472-Net-WI26",
+      "grader_team": "graders",
+      "grader_permission": "push",
+      "student_permission": "push",
+      "course_info_repo": "course-info",
+      "course_info_url": "https://github.com/CS472-Net-WI26/course-info/blob/main/readme.md"
+    }
+  }
+}

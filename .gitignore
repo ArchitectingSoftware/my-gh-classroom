@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# Go build artifacts
+gh-course-admin
+dist/
+*.test
+*.out
+
+go.work
+go.work.sum
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
