@@ -24,6 +24,9 @@ type Classroom struct {
 	StudentPermission string `json:"student_permission"`
 	CourseInfoRepo    string `json:"course_info_repo"`
 	CourseInfoURL     string `json:"course_info_url"`
+	// CourseName is the human-readable course label used in generated
+	// repository descriptions and READMEs. Optional; defaults to the alias.
+	CourseName string `json:"course_name,omitempty"`
 }
 
 type Config struct {
@@ -34,10 +37,30 @@ type Config struct {
 var repoNameRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 var classroomAliasRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
-func Load(path string) (Config, error) {
-	if path == "" {
-		path = "config.json"
+// ResolvePath determines which config file to use. Precedence:
+//  1. explicit path (the --config flag)
+//  2. $MGC_CONFIG
+//  3. ./config.json, if it exists
+//  4. <user config dir>/mgc/config.json (e.g. ~/.config/mgc/config.json on
+//     Linux, ~/Library/Application Support/mgc/config.json on macOS)
+func ResolvePath(explicit string) string {
+	if explicit != "" {
+		return explicit
 	}
+	if env := os.Getenv("MGC_CONFIG"); env != "" {
+		return env
+	}
+	if _, err := os.Stat("config.json"); err == nil {
+		return "config.json"
+	}
+	if dir, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(dir, "mgc", "config.json")
+	}
+	return "config.json"
+}
+
+func Load(path string) (Config, error) {
+	path = ResolvePath(path)
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return Config{}, err
@@ -45,7 +68,7 @@ func Load(path string) (Config, error) {
 	data, err := os.ReadFile(abs)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return Config{}, fmt.Errorf("config file not found: %s", abs)
+			return Config{}, fmt.Errorf("config file not found: %s (use --config, set MGC_CONFIG, or create ./config.json)", abs)
 		}
 		return Config{}, fmt.Errorf("could not read config: %w", err)
 	}
@@ -63,8 +86,9 @@ func Load(path string) (Config, error) {
 }
 
 func Save(path string, c Config) error {
-	if path == "" {
-		path = "config.json"
+	path = ResolvePath(path)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("could not create config directory: %w", err)
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
@@ -101,6 +125,22 @@ func (c Config) ClassroomAliases() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// ClassroomWithAlias is like Classroom but also fills CourseName from the
+// alias when it is not configured.
+func (c Config) ClassroomWithAlias(alias string) (string, Classroom, error) {
+	if alias == "" {
+		alias = c.DefaultClassroom
+	}
+	cl, err := c.Classroom(alias)
+	if err != nil {
+		return "", Classroom{}, err
+	}
+	if strings.TrimSpace(cl.CourseName) == "" {
+		cl.CourseName = strings.ToUpper(alias)
+	}
+	return alias, cl, nil
 }
 
 func applyDefaults(c Classroom) Classroom {

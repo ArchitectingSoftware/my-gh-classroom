@@ -3,10 +3,37 @@ package gh
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 )
+
+// API is the subset of GitHub CLI behavior the rest of mgc depends on.
+// The production implementation shells out to `gh`; tests substitute a fake.
+type API interface {
+	Run(args ...string) ([]byte, error)
+	RunInput(input []byte, args ...string) ([]byte, error)
+}
+
+// Error is returned when a gh invocation exits non-zero.
+type Error struct {
+	Args   []string
+	Detail string
+}
+
+func (e *Error) Error() string {
+	return fmt.Sprintf("gh command failed:\n  gh %s\n\n%s", strings.Join(e.Args, " "), e.Detail)
+}
+
+// IsNotFound reports whether err is a gh API failure caused by an HTTP 404.
+func IsNotFound(err error) bool {
+	var ge *Error
+	if !errors.As(err, &ge) {
+		return false
+	}
+	return strings.Contains(ge.Detail, "HTTP 404") || strings.Contains(ge.Detail, "Not Found (HTTP 404)")
+}
 
 type Client struct{}
 
@@ -28,7 +55,7 @@ func (c *Client) run(stdin []byte, args ...string) ([]byte, error) {
 		if detail == "" {
 			detail = strings.TrimSpace(stdout.String())
 		}
-		return nil, fmt.Errorf("gh command failed:\n  gh %s\n\n%s", strings.Join(args, " "), detail)
+		return nil, &Error{Args: args, Detail: detail}
 	}
 	return stdout.Bytes(), nil
 }
@@ -36,24 +63,25 @@ func (c *Client) run(stdin []byte, args ...string) ([]byte, error) {
 func (c *Client) Run(args ...string) ([]byte, error)                    { return c.run(nil, args...) }
 func (c *Client) RunInput(input []byte, args ...string) ([]byte, error) { return c.run(input, args...) }
 
-func (c *Client) JSON(out any, args ...string) error {
-	data, err := c.Run(args...)
+// JSON runs a gh command and decodes its stdout into out.
+func JSON(api API, out any, args ...string) error {
+	data, err := api.Run(args...)
 	if err != nil {
 		return err
 	}
-	if len(bytes.TrimSpace(data)) == 0 {
-		return nil
-	}
-	if err := json.Unmarshal(data, out); err != nil {
-		return fmt.Errorf("invalid JSON from gh: %w", err)
-	}
-	return nil
+	return decode(data, out)
 }
-func (c *Client) JSONInput(out any, input []byte, args ...string) error {
-	data, err := c.RunInput(input, args...)
+
+// JSONInput runs a gh command with stdin and decodes its stdout into out.
+func JSONInput(api API, out any, input []byte, args ...string) error {
+	data, err := api.RunInput(input, args...)
 	if err != nil {
 		return err
 	}
+	return decode(data, out)
+}
+
+func decode(data []byte, out any) error {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return nil
 	}

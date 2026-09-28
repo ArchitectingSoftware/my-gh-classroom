@@ -7,8 +7,11 @@ Icon?
 .Spotlight-V100
 .Trashes
 
+# NFS/OrbStack stale file handles
+.nfs*
+
 # Go build artifacts
-gh-course-admin
+mgc
 dist/
 *.test
 *.out
@@ -33,3 +36,6 @@ go.work.sum
 *.csv
 *.xlsx
 *.xls
+
+#executable files
+mgc

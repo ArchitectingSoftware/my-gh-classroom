@@ -1,15 +1,18 @@
 BINARY := mgc
 
-.PHONY: build install clean test fmt tidy
+.PHONY: build install clean test vet fmt tidy release
 
 build:
 	go build -o $(BINARY) .
 
 install:
-	go install .
+	go build -o $$(go env GOPATH)/bin/$(BINARY) .
 
 test:
 	go test ./...
+
+vet:
+	go vet ./...
 
 fmt:
 	gofmt -w main.go cmd internal

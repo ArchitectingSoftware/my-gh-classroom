@@ -39,7 +39,7 @@ GitHub API access. It does not store GitHub credentials.
 - Inspect student repository permissions and pending invitations.
 - Batch-provision students from CSV data.
 - Safely skip existing student repositories rather than overwrite
-  student work.
+  student work, while repairing any missing access or metadata.
 
 ## Prerequisites
 
@@ -136,6 +136,12 @@ or:
 make build
 ```
 
+Install `mgc` into `$(go env GOPATH)/bin`:
+
+``` bash
+make install
+```
+
 The resulting executable is:
 
 ``` text
@@ -148,9 +154,30 @@ You can also build directly:
 go build -o mgc .
 ```
 
+Run the tests:
+
+``` bash
+make test
+```
+
+The tests use a fake GitHub CLI, so they need no network access or
+`gh` authentication.
+
 ## Configuration
 
 `mgc` supports multiple classrooms in one `config.json`.
+
+### Config file location
+
+`mgc` uses the first of these that applies:
+
+1. `--config PATH`
+2. the `MGC_CONFIG` environment variable
+3. `./config.json`, if it exists in the current directory
+4. the per-user config directory: `~/Library/Application Support/mgc/config.json`
+   on macOS, `~/.config/mgc/config.json` on Linux
+
+Options 2 and 4 let an installed `mgc` run from any directory.
 
 A **classroom alias** is a short local name used by the CLI. It does not
 have to match the GitHub organization name.
@@ -187,7 +214,8 @@ A configuration can therefore look like:
       "grader_permission": "push",
       "student_permission": "push",
       "course_info_repo": "course-info",
-      "course_info_url": "https://github.com/CS281-Arch-FA26/course-info"
+      "course_info_url": "https://github.com/CS281-Arch-FA26/course-info",
+      "course_name": "CS281"
     }
   }
 }
@@ -203,6 +231,7 @@ A configuration can therefore look like:
 | `student_permission` | Direct permission granted to each student.                     |
 | `course_info_repo`   | Shared course-information repository.                          |
 | `course_info_url`    | URL inserted into each student’s initial README.               |
+| `course_name`        | Optional course label for repo descriptions and READMEs. Defaults to the upper-cased alias. |
 
 `default_classroom` contains the classroom alias used when
 `--classroom`/`-cr` is not supplied.
@@ -474,10 +503,17 @@ Use it for stable information such as:
 Assignments, grades, solutions, and other restricted content can remain
 in the LMS.
 
-Each newly provisioned student repository receives a small README
-linking to the classroom’s configured `course_info_url`.
+Each newly provisioned student repository receives a small README,
+titled with the classroom’s `course_name`, linking to its configured
+`course_info_url`.
 
 ## Creating a Student Repository
+
+Before provisioning the first student in a classroom, make sure the
+grader team exists and the custom-property schema is set up (see
+[Grader Team Management](#grader-team-management) and
+[Repository Custom Properties](#repository-custom-properties)).
+`./mgc doctor` and `./mgc properties list` will show both.
 
 Preview:
 
@@ -507,13 +543,20 @@ For a new repository, `mgc`:
 2.  verifies that the GitHub account exists;
 3.  checks whether the repository already exists;
 4.  creates a private repository;
-5.  grants the student access;
+5.  initializes `README.md` with the `course-info` link;
 6.  grants the grader team access;
-7.  initializes `README.md` with the `course-info` link; and
+7.  grants the student access (which sends the invitation); and
 8.  assigns searchable student metadata.
 
-If the repository already exists, it is skipped and left untouched. This
-makes repeated/incremental provisioning safe.
+If the repository already exists, its contents are never touched. `mgc`
+instead checks that the student has access (or a pending invitation),
+that the grader team is connected, and that the custom properties are
+set, and repairs whatever is missing. If an earlier run failed partway
+through, re-running the same command finishes the setup. The initial
+README is only written when the repository is first created.
+
+`mgc` refuses to reuse an existing repository whose `github_id` property
+names a different student, or whose `repo_type` is not `student`.
 
 To provision into a non-default classroom:
 
@@ -531,7 +574,10 @@ List student repositories:
 ./mgc student list
 ```
 
-Show details for a student:
+Only repositories with `repo_type=student` are listed; the number of
+other repositories in the organization is noted at the end.
+
+Show details for a student, by GitHub ID or repository name:
 
 ``` bash
 ./mgc student info jsmith42
@@ -560,7 +606,8 @@ Search by GitHub ID:
 ./mgc student find "jsmith42"
 ```
 
-Search is case-insensitive and supports partial matches.
+Search is case-insensitive, supports partial matches, and covers
+repositories with `repo_type=student`.
 
 You can search another classroom explicitly:
 
@@ -586,8 +633,9 @@ Review the dry run, then apply:
   --name-column "Student"
 ```
 
-Existing repositories are skipped, so the same CSV can be processed
-repeatedly as students complete setup.
+Existing repositories are skipped (and repaired if needed), so the same
+CSV can be processed repeatedly as students complete setup. A UTF-8 BOM
+on the header row and short rows are tolerated.
 
 The Canvas-specific parser is still being refined against a real Canvas
 Student Analysis export.
@@ -662,8 +710,9 @@ inside the student’s course repository.
 team per classroom rather than being added individually to every
 repository.
 
-**Never overwrite student work during provisioning.** Existing
-repositories are skipped.
+**Never overwrite student work during provisioning.** The contents of
+existing repositories are never modified; only missing access grants
+and metadata are repaired.
 
 **Prefer explicit operations.** Missing prerequisites produce errors
 rather than silently creating unrelated resources.
@@ -677,7 +726,7 @@ the official GitHub CLI.
 
 ``` text
 .
-├── cmd/
+├── cmd/                 Cobra commands (one file per command group)
 │   ├── classroom.go
 │   ├── doctor.go
 │   ├── properties.go
@@ -685,9 +734,9 @@ the official GitHub CLI.
 │   ├── student.go
 │   └── team.go
 ├── internal/
-│   ├── config/
-│   ├── course/
-│   └── gh/
+│   ├── config/          config loading, validation, and path resolution
+│   ├── course/          classroom operations (provisioning, search, teams)
+│   └── gh/              thin wrapper around the `gh` CLI
 ├── main.go
 ├── config.json
 ├── go.mod
@@ -699,6 +748,11 @@ Configuration persistence uses Go’s standard JSON support. Cobra
 provides the command/subcommand structure, and `gh` provides
 authenticated GitHub API access.
 
+Each package has `_test.go` files alongside it. `internal/course` tests
+run against a fake `gh` (`fake_gh_test.go`) that records every API call,
+so tests can assert exactly which mutations a command performs,
+including that dry runs perform none.
+
 ## Dependencies
 
 - [Cobra](https://github.com/spf13/cobra) for CLI commands and flags.
@@ -709,7 +763,18 @@ authenticated GitHub API access.
 
 The core multi-classroom configuration, grader-team administration,
 custom-property setup, one-off student provisioning, student
-inspection/search, and CSV batch provisioning workflows are implemented.
+inspection/search, and CSV batch provisioning workflows are implemented
+and covered by unit tests.
+
+### Upgrading from earlier versions
+
+Earlier versions did not send the request body when setting custom
+properties, so student repositories created with them may have no
+`repo_type`, `student_name`, or `github_id` values. Those repositories
+will not appear in `student list` or `student find`. To fix them,
+re-run the original `student create` or `student create-batch` command:
+it detects the missing properties and sets them without touching
+repository contents. Review the dry run first.
 
 Canvas-specific batch parsing remains the next integration task, pending
 a real Canvas Student Analysis export.

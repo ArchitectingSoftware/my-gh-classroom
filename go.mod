@@ -1,6 +1,6 @@
 module github.com/ArchitectingSoftware/my-gh-classroom
 
-go 1.27
+go 1.23
 
 require github.com/spf13/cobra v1.10.2
 

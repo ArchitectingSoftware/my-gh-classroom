@@ -20,10 +20,11 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "gh-course-admin",
+	Use:   "mgc",
 	Short: "GitHub administration utility for programming courses",
 	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 		var err error
+		configPath = config.ResolvePath(configPath)
 		cfg, err = config.Load(configPath)
 		if err != nil {
 			return err
@@ -46,7 +47,7 @@ var rootCmd = &cobra.Command{
 			fmt.Println("WARNING: No default classroom is configured.")
 			return fmt.Errorf("no classroom selected and no default classroom is configured; use --classroom/-cr or set a default")
 		}
-		cl, err := cfg.Classroom(alias)
+		alias, cl, err := cfg.ClassroomWithAlias(alias)
 		if err != nil {
 			return err
 		}
@@ -62,17 +63,7 @@ func Execute() {
 	// pflag only permits a single-character shorthand. We intentionally support
 	// the more readable legacy forms -cr and -apply by normalizing them to
 	// their long-form equivalents before Cobra/pflag parses the arguments.
-	args := make([]string, len(os.Args))
-	copy(args, os.Args)
-	for i := range args {
-		switch args[i] {
-		case "-cr":
-			args[i] = "--classroom"
-		case "-apply":
-			args[i] = "--apply"
-		}
-	}
-	rootCmd.SetArgs(args[1:])
+	rootCmd.SetArgs(normalizeArgs(os.Args[1:]))
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR:", err)
@@ -80,8 +71,27 @@ func Execute() {
 	}
 }
 
+// normalizeArgs rewrites -cr and -apply to their long forms. Arguments after
+// a bare "--" are left untouched.
+func normalizeArgs(in []string) []string {
+	out := make([]string, len(in))
+	copy(out, in)
+	for i, a := range out {
+		if a == "--" {
+			break
+		}
+		switch a {
+		case "-cr":
+			out[i] = "--classroom"
+		case "-apply":
+			out[i] = "--apply"
+		}
+	}
+	return out
+}
+
 func init() {
-	rootCmd.PersistentFlags().StringVar(&configPath, "config", "config.json", "Path to config.json")
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "Path to config.json (default: $MGC_CONFIG, ./config.json, or ~/.config/mgc/config.json)")
 	rootCmd.PersistentFlags().BoolVarP(&apply, "apply", "a", false, "Actually perform a mutating operation; otherwise mutating commands are dry-run")
 	rootCmd.PersistentFlags().StringVar(&classroomAlias, "classroom", "", "Classroom alias to use; defaults to configured default classroom")
 	rootCmd.AddCommand(doctorCmd(), teamCmd(), studentCmd(), propertiesCmd(), classroomCmd())

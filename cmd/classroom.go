@@ -133,17 +133,17 @@ func classroomCmd() *cobra.Command {
 		fmt.Println("Configuration:    OK")
 		g := gh.New()
 		var org map[string]any
-		if err := g.JSON(&org, "api", fmt.Sprintf("orgs/%s", cl.Organization)); err != nil {
+		if err := gh.JSON(g, &org, "api", fmt.Sprintf("orgs/%s", cl.Organization)); err != nil {
 			return err
 		}
 		fmt.Printf("GitHub org:        OK (%v)\n", org["login"])
 		var repo map[string]any
-		if err := g.JSON(&repo, "api", fmt.Sprintf("repos/%s/%s", cl.Organization, cl.CourseInfoRepo)); err != nil {
+		if err := gh.JSON(g, &repo, "api", fmt.Sprintf("repos/%s/%s", cl.Organization, cl.CourseInfoRepo)); err != nil {
 			return err
 		}
 		fmt.Printf("Course info repo:  OK (%v)\n", repo["name"])
 		var team map[string]any
-		if err := g.JSON(&team, "api", fmt.Sprintf("orgs/%s/teams/%s", cl.Organization, cl.GraderTeam)); err != nil {
+		if err := gh.JSON(g, &team, "api", fmt.Sprintf("orgs/%s/teams/%s", cl.Organization, cl.GraderTeam)); err != nil {
 			return err
 		}
 		fmt.Printf("Grader team:       OK (%v)\n", team["name"])
