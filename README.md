@@ -2,7 +2,7 @@
 
 `my-gh-classroom` is a lightweight command-line utility for managing
 GitHub organizations used as programming classrooms. The compiled binary
-is named `mgc`.
+is named `mgc`. 
 
 It is designed for a simple model:
 
