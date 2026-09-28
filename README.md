@@ -37,7 +37,9 @@ GitHub API access. It does not store GitHub credentials.
   properties.
 - Find students by name, GitHub ID, or repository name.
 - Inspect student repository permissions and pending invitations.
-- Batch-provision students from CSV data.
+- Import students from a Canvas export (`classroom import`), as a
+  repeatable upsert with an on-screen and saved report.
+- Batch-provision students from generic CSV data.
 - Safely skip existing student repositories rather than overwrite
   student work, while repairing any missing access or metadata.
 
@@ -615,9 +617,69 @@ You can search another classroom explicitly:
 ./mgc -cr cs281 student find "Smith"
 ```
 
+## Importing Students from Canvas
+
+`classroom import` provisions students from a Canvas survey export:
+
+``` bash
+./mgc classroom import Canvas-Export.csv            # dry run, whole file
+./mgc classroom import Canvas-Export.csv -n 2       # dry run, first 2 students
+./mgc -apply classroom import Canvas-Export.csv     # create repositories
+./mgc -cr cs281 -apply classroom import roster.csv  # a non-default classroom
+```
+
+The CSV must have a `Name` column (e.g. `Jane Smith`) and a `GitHub-ID`
+column. Other columns are ignored. The file is checked for both columns
+before anything is sent to GitHub. Running `classroom import` with no
+file prints a warning and usage.
+
+`-n`/`--number N` processes only the first N students, which is handy
+for trying things out. Without it the whole file is processed.
+
+Import is an **upsert**. A student who already has a repository, found
+by the `github_id` custom property or by a repository named after their
+GitHub ID, is skipped and their repository is not changed in any way.
+The same export can be imported again and again as more students fill
+in the survey. The same GitHub ID appearing twice in the file is only
+processed once.
+
+Before processing students, import checks that the grader team exists
+and the custom-property schema is set up. A missing team stops the run.
+Missing properties stop an `-apply` run and produce a warning in a dry
+run.
+
+Common entry mistakes are cleaned up: a leading `@` or a full
+`https://github.com/...` URL becomes the bare username, and the report
+notes what the student originally typed. Blank or malformed IDs, and
+accounts that do not exist on GitHub, are reported as errors without
+stopping the run.
+
+A report is printed as each student is processed:
+
+``` text
+[ 1/44] Jane Smith                   jsmith42               CREATING     SUCCESS  https://github.com/CS472-Net-WI26/jsmith42
+[ 2/44] Bob Baker                    bbaker                 SKIPPING     SUCCESS  repository exists: https://github.com/CS472-Net-WI26/bbaker
+[ 3/44] Carol Chen                   cchen-typo             CHECKING     ERROR    GitHub user 'cchen-typo' does not exist
+```
+
+The statuses are `CREATING`, `WOULD CREATE` (dry run), `SKIPPING`, and
+`CHECKING` (the student failed validation before any action). A summary
+follows, with any errors repeated alongside their CSV row numbers.
+
+The same report is written to `import-results.txt` in the current
+directory, which is overwritten on each run. It contains student names,
+so it is listed in `.gitignore`. The command exits non-zero if any
+student had an error.
+
+If a repository is created but a later setup step fails, the error line
+includes the `mgc -apply student create ...` command that finishes the
+setup. Because import never modifies existing repositories, use that
+command (not another import) to repair it.
+
 ## Batch Student Provisioning
 
-CSV-based provisioning is available:
+Generic CSV provisioning, with configurable column names, is also
+available:
 
 ``` bash
 ./mgc student create-batch students.csv \
@@ -637,8 +699,8 @@ Existing repositories are skipped (and repaired if needed), so the same
 CSV can be processed repeatedly as students complete setup. A UTF-8 BOM
 on the header row and short rows are tolerated.
 
-The Canvas-specific parser is still being refined against a real Canvas
-Student Analysis export.
+Unlike `classroom import`, `create-batch` repairs missing access and
+metadata on existing repositories.
 
 ## Suggested Canvas Workflow
 
@@ -651,10 +713,13 @@ A simple workflow is:
 3.  Ask students to visit GitHub and verify that they can log into the
     account before submitting.
 4.  Export the Canvas Student Analysis results as CSV.
-5.  Run batch provisioning in dry-run mode.
-6.  Review blank or invalid GitHub usernames.
-7.  Apply the batch.
-8.  Re-run later for students who were absent or had account problems.
+5.  Run `./mgc classroom import Canvas-Export.csv` (a dry run) and
+    review the report, especially any `ERROR` lines.
+6.  Optionally try a couple of students for real:
+    `./mgc -apply classroom import Canvas-Export.csv -n 2`.
+7.  Run `./mgc -apply classroom import Canvas-Export.csv`.
+8.  Re-export and re-run later for students who were absent or had
+    account problems. Students already provisioned are skipped.
 
 ## Student Invitations
 
@@ -728,12 +793,14 @@ the official GitHub CLI.
 .
 ├── cmd/                 Cobra commands (one file per command group)
 │   ├── classroom.go
+│   ├── import.go        classroom import (Canvas)
 │   ├── doctor.go
 │   ├── properties.go
 │   ├── root.go
 │   ├── student.go
 │   └── team.go
 ├── internal/
+│   ├── canvas/          Canvas export parsing
 │   ├── config/          config loading, validation, and path resolution
 │   ├── course/          classroom operations (provisioning, search, teams)
 │   └── gh/              thin wrapper around the `gh` CLI
@@ -763,8 +830,8 @@ including that dry runs perform none.
 
 The core multi-classroom configuration, grader-team administration,
 custom-property setup, one-off student provisioning, student
-inspection/search, and CSV batch provisioning workflows are implemented
-and covered by unit tests.
+inspection/search, Canvas import, and CSV batch provisioning workflows
+are implemented and covered by unit tests.
 
 ### Upgrading from earlier versions
 
@@ -775,6 +842,3 @@ will not appear in `student list` or `student find`. To fix them,
 re-run the original `student create` or `student create-batch` command:
 it detects the missing properties and sets them without touching
 repository contents. Review the dry run first.
-
-Canvas-specific batch parsing remains the next integration task, pending
-a real Canvas Student Analysis export.

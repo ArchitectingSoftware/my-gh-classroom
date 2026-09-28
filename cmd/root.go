@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -19,9 +20,17 @@ var (
 	activeConfig    config.Classroom
 )
 
+// errUsageShown signals that a command already printed a warning and its
+// usage; Execute exits non-zero without printing anything further.
+var errUsageShown = errors.New("usage shown")
+
 var rootCmd = &cobra.Command{
 	Use:   "mgc",
 	Short: "GitHub administration utility for programming courses",
+	// Execute prints errors itself; without these Cobra would print each
+	// error a second time followed by the full usage text.
+	SilenceErrors: true,
+	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 		var err error
 		configPath = config.ResolvePath(configPath)
@@ -34,8 +43,9 @@ var rootCmd = &cobra.Command{
 		}
 
 		// Classroom management commands load the configuration but do not require
-		// a selected classroom, except verify which takes an optional alias.
-		if cmd.Parent() != nil && cmd.Parent().Name() == "classroom" {
+		// a selected classroom (verify takes an optional alias). The exception is
+		// import, which provisions students into the active classroom.
+		if cmd.Parent() != nil && cmd.Parent().Name() == "classroom" && cmd.Name() != "import" {
 			return nil
 		}
 
@@ -66,7 +76,9 @@ func Execute() {
 	rootCmd.SetArgs(normalizeArgs(os.Args[1:]))
 
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR:", err)
+		if !errors.Is(err, errUsageShown) {
+			fmt.Fprintln(os.Stderr, "ERROR:", err)
+		}
 		os.Exit(1)
 	}
 }

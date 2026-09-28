@@ -29,6 +29,9 @@ const sampleConfig = `{
 func run(t *testing.T, cfgFile string, args ...string) error {
 	t.Helper()
 	apply, classroomAlias, configPath = false, "", ""
+	if c, _, err := rootCmd.Find([]string{"classroom", "import"}); err == nil {
+		_ = c.Flags().Set("number", "0")
+	}
 	rootCmd.SetArgs(normalizeArgs(append([]string{"--config", cfgFile}, args...)))
 	return rootCmd.Execute()
 }

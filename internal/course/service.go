@@ -432,37 +432,48 @@ func (s *Service) CreateStudentRepo(name, github, repoName string) (string, erro
 	if ok {
 		return s.reconcileStudentRepo(existing, repoName, slug, name, actual)
 	}
-	course := courseLabel(s.C)
 	if !s.Apply {
 		s.printf("DRY RUN   would create private repo %s/%s\n          student: %s (%s)\n          add student collaborator with: %s\n          add team '%s' with: %s\n          initialize README with link to course-info\n          set custom properties: repo_type=student, student_name=%s, github_id=%s\n", s.C.Organization, repoName, name, actual, s.C.StudentPermission, s.C.GraderTeam, s.C.GraderPermission, name, actual)
 		return ResultDryRun, nil
 	}
-	if _, err := s.GH.Run("api", "--method", "POST", fmt.Sprintf("orgs/%s/repos", s.C.Organization), "-f", "name="+repoName, "-f", fmt.Sprintf("description=%s student repository for %s", course, name), "-F", "private=true", "-F", "has_issues=false", "-F", "has_projects=false", "-F", "has_wiki=false", "-F", "auto_init=true"); err != nil {
+	if err := s.createNew(slug, name, actual, repoName); err != nil {
 		return "", err
-	}
-	var readme map[string]any
-	if err := s.json(&readme, "api", fmt.Sprintf("repos/%s/%s/contents/README.md", s.C.Organization, repoName)); err != nil {
-		return "", s.partial(repoName, err)
-	}
-	enc := base64.StdEncoding.EncodeToString([]byte(studentReadme(course, name, actual, s.C.CourseInfoURL)))
-	if _, err := s.GH.Run("api", "--method", "PUT", fmt.Sprintf("repos/%s/%s/contents/README.md", s.C.Organization, repoName), "-f", "message=Initialize course README", "-f", "content="+enc, "-f", "sha="+str(readme["sha"])); err != nil {
-		return "", s.partial(repoName, err)
-	}
-	if err := s.grantTeam(slug, repoName); err != nil {
-		return "", s.partial(repoName, err)
-	}
-	if err := s.grantStudent(repoName, actual); err != nil {
-		return "", s.partial(repoName, err)
-	}
-	if err := s.SetRepoProperties(repoName, map[string]string{"repo_type": "student", "student_name": name, "github_id": actual}); err != nil {
-		return "", s.partial(repoName, err)
 	}
 	s.printf("CREATED   %s (%s)\n          repo: https://github.com/%s/%s\n          student access: %s\n          grader team: %s (%s)\n          invitation: GitHub will notify the student if an invitation is pending\n", name, actual, s.C.Organization, repoName, s.C.StudentPermission, s.C.GraderTeam, s.C.GraderPermission)
 	return ResultCreated, nil
 }
 
-func (s *Service) partial(repo string, err error) error {
-	return fmt.Errorf("repository %s/%s was created but setup did not finish; re-run the same command to repair it: %w", s.C.Organization, repo, err)
+// createNew creates and fully provisions a new student repository without
+// printing anything. Callers are responsible for dry-run handling and
+// for confirming the repository does not already exist.
+func (s *Service) createNew(slug, name, login, repoName string) error {
+	course := courseLabel(s.C)
+	actual := login
+	if _, err := s.GH.Run("api", "--method", "POST", fmt.Sprintf("orgs/%s/repos", s.C.Organization), "-f", "name="+repoName, "-f", fmt.Sprintf("description=%s student repository for %s", course, name), "-F", "private=true", "-F", "has_issues=false", "-F", "has_projects=false", "-F", "has_wiki=false", "-F", "auto_init=true"); err != nil {
+		return err
+	}
+	var readme map[string]any
+	if err := s.json(&readme, "api", fmt.Sprintf("repos/%s/%s/contents/README.md", s.C.Organization, repoName)); err != nil {
+		return s.partial(repoName, name, actual, err)
+	}
+	enc := base64.StdEncoding.EncodeToString([]byte(studentReadme(course, name, actual, s.C.CourseInfoURL)))
+	if _, err := s.GH.Run("api", "--method", "PUT", fmt.Sprintf("repos/%s/%s/contents/README.md", s.C.Organization, repoName), "-f", "message=Initialize course README", "-f", "content="+enc, "-f", "sha="+str(readme["sha"])); err != nil {
+		return s.partial(repoName, name, actual, err)
+	}
+	if err := s.grantTeam(slug, repoName); err != nil {
+		return s.partial(repoName, name, actual, err)
+	}
+	if err := s.grantStudent(repoName, actual); err != nil {
+		return s.partial(repoName, name, actual, err)
+	}
+	if err := s.SetRepoProperties(repoName, map[string]string{"repo_type": "student", "student_name": name, "github_id": actual}); err != nil {
+		return s.partial(repoName, name, actual, err)
+	}
+	return nil
+}
+
+func (s *Service) partial(repo, name, login string, err error) error {
+	return fmt.Errorf("repository %s/%s was created but setup did not finish; repair it with: mgc -apply student create --name %q --github %s --repo %s: %w", s.C.Organization, repo, name, login, repo, err)
 }
 
 func (s *Service) grantTeam(slug, repo string) error {

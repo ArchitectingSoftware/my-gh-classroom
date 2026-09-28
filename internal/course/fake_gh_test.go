@@ -156,3 +156,9 @@ func repoPath(repo, rest string) string {
 func teamRepoPath(repo string) string {
 	return "orgs/" + org + "/teams/graders/repos/" + org + "/" + repo
 }
+
+// errWithArgs builds a gh failure whose Error() includes noisy arguments,
+// as real failures do.
+func errWithArgs(detail string) error {
+	return &gh.Error{Args: []string{"api", "--method", "PUT", "x", "-f", "content=QUJDREVGRw=="}, Detail: detail}
+}

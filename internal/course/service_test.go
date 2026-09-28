@@ -173,7 +173,7 @@ func TestCreateStudentRepoPartialFailureSaysRerun(t *testing.T) {
 		fail("PUT", repoPath("jsmith42", "collaborators/jsmith42"), errors.New("boom"))
 
 	_, err := s.CreateStudentRepo("Jane", "jsmith42", "")
-	if err == nil || !strings.Contains(err.Error(), "re-run") {
+	if err == nil || !strings.Contains(err.Error(), "repair it with: mgc -apply student create") {
 		t.Fatalf("err = %v, want re-run hint", err)
 	}
 }

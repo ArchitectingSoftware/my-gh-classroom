@@ -152,6 +152,6 @@ func classroomCmd() *cobra.Command {
 		return nil
 	}}
 
-	cmd.AddCommand(list, create, remove, defaultCmd, verify)
+	cmd.AddCommand(list, create, remove, defaultCmd, verify, importCmd())
 	return cmd
 }
