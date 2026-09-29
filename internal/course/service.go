@@ -2,7 +2,6 @@ package course
 
 import (
 	"encoding/base64"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -138,36 +137,68 @@ func (s *Service) AddTeamMember(team, user string) error {
 		s.printf("SKIP      %s is already a member of '%s'\n", login, team)
 		return nil
 	}
-	if !s.Apply {
-		s.printf("DRY RUN   would add %s to '%s'\n", login, team)
+	invs, err := s.TeamInvites(team)
+	if err != nil {
+		return err
+	}
+	if i, ok := findInvite(invs, login); ok && i.usable() {
+		s.printf("SKIP      %s has already been invited to '%s' (%s)\n          accept at: %s\n", login, team, inviteStatus(i), i.URL)
 		return nil
 	}
-	_, err = s.GH.Run("api", "--method", "PUT", fmt.Sprintf("orgs/%s/teams/%s/memberships/%s", s.C.Organization, team, login), "-f", "role=member")
-	if err == nil {
-		s.printf("ADDED     %s to '%s'\n", login, team)
+	if !s.Apply {
+		s.printf("DRY RUN   would add %s to '%s'\n          (GitHub sends an invitation if they are not yet in %s)\n", login, team, s.C.Organization)
+		return nil
 	}
-	return err
+	out, err := s.GH.Run("api", "--method", "PUT", fmt.Sprintf("orgs/%s/teams/%s/memberships/%s", s.C.Organization, team, login), "-f", "role=member")
+	if err != nil {
+		return err
+	}
+	var m map[string]any
+	_ = json.Unmarshal(out, &m) // an unreadable body just means we can't tell pending from active
+	if str(m["state"]) == "pending" {
+		s.printf("INVITED   %s to '%s'; they must accept the organization invitation\n          accept at: %s (signed in as %s)\n", login, team, s.OrgInviteURL(), login)
+		return nil
+	}
+	s.printf("ADDED     %s to '%s'\n", login, team)
+	return nil
 }
 
+// RemoveTeamMember removes an active member, or cancels a pending
+// invitation for someone who has not yet accepted.
 func (s *Service) RemoveTeamMember(team, user string) error {
 	ms, err := s.TeamMembers(team)
 	if err != nil {
 		return err
 	}
-	login, ok := findMember(ms, user)
+	if login, ok := findMember(ms, user); ok {
+		if !s.Apply {
+			s.printf("DRY RUN   would remove %s from '%s'\n", login, team)
+			return nil
+		}
+		if _, err := s.GH.Run("api", "--method", "DELETE", fmt.Sprintf("orgs/%s/teams/%s/memberships/%s", s.C.Organization, team, login)); err != nil {
+			return err
+		}
+		s.printf("REMOVED   %s from '%s'\n", login, team)
+		return nil
+	}
+	invs, err := s.TeamInvites(team)
+	if err != nil {
+		return err
+	}
+	i, ok := findInvite(invs, user)
 	if !ok {
-		s.printf("SKIP      %s is not a member of '%s'\n", user, team)
+		s.printf("SKIP      %s is not a member of '%s' and has no pending invitation\n", user, team)
 		return nil
 	}
 	if !s.Apply {
-		s.printf("DRY RUN   would remove %s from '%s'\n", login, team)
+		s.printf("DRY RUN   would cancel the pending invitation for %s to '%s'\n          (this cancels their organization invitation to %s)\n", i.Name, team, s.C.Organization)
 		return nil
 	}
-	_, err = s.GH.Run("api", "--method", "DELETE", fmt.Sprintf("orgs/%s/teams/%s/memberships/%s", s.C.Organization, team, login))
-	if err == nil {
-		s.printf("REMOVED   %s from '%s'\n", login, team)
+	if _, err := s.GH.Run("api", "--method", "DELETE", fmt.Sprintf("orgs/%s/invitations/%s", s.C.Organization, i.ID)); err != nil {
+		return err
 	}
-	return err
+	s.printf("CANCELLED invitation for %s to '%s'\n", i.Name, team)
+	return nil
 }
 
 // ---------------------------------------------------------------- users & repos
@@ -405,9 +436,9 @@ func studentReadme(course, name, github, url string) string {
 }
 
 // CreateStudentRepo provisions a student repository. If the repository
-// already exists its content is never touched, but missing access grants and
-// metadata are repaired so that a partially failed earlier run can be fixed
-// by re-running. It returns one of the Result* constants.
+// already exists, missing access grants and metadata are repaired (see
+// planRepair) so that a partially failed earlier run can be fixed by
+// re-running. It returns one of the Result* constants.
 func (s *Service) CreateStudentRepo(name, github, repoName string) (string, error) {
 	team, err := s.EnsureTeam(s.C.GraderTeam)
 	if err != nil {
@@ -420,10 +451,10 @@ func (s *Service) CreateStudentRepo(name, github, repoName string) (string, erro
 	}
 	actual := str(u["login"])
 	if repoName == "" {
-		repoName = actual
+		repoName = s.RepoName(actual)
 	}
-	if !repoNameRE.MatchString(repoName) {
-		return "", fmt.Errorf("invalid repository name '%s'", repoName)
+	if err := ValidateRepoName(repoName); err != nil {
+		return "", err
 	}
 	existing, ok, err := s.RepoGet(repoName)
 	if err != nil {
@@ -443,37 +474,70 @@ func (s *Service) CreateStudentRepo(name, github, repoName string) (string, erro
 	return ResultCreated, nil
 }
 
-// createNew creates and fully provisions a new student repository without
-// printing anything. Callers are responsible for dry-run handling and
-// for confirming the repository does not already exist.
-func (s *Service) createNew(slug, name, login, repoName string) error {
-	course := courseLabel(s.C)
-	actual := login
-	if _, err := s.GH.Run("api", "--method", "POST", fmt.Sprintf("orgs/%s/repos", s.C.Organization), "-f", "name="+repoName, "-f", fmt.Sprintf("description=%s student repository for %s", course, name), "-F", "private=true", "-F", "has_issues=false", "-F", "has_projects=false", "-F", "has_wiki=false", "-F", "auto_init=true"); err != nil {
-		return err
-	}
-	var readme map[string]any
-	if err := s.json(&readme, "api", fmt.Sprintf("repos/%s/%s/contents/README.md", s.C.Organization, repoName)); err != nil {
-		return s.partial(repoName, name, actual, err)
-	}
-	enc := base64.StdEncoding.EncodeToString([]byte(studentReadme(course, name, actual, s.C.CourseInfoURL)))
-	if _, err := s.GH.Run("api", "--method", "PUT", fmt.Sprintf("repos/%s/%s/contents/README.md", s.C.Organization, repoName), "-f", "message=Initialize course README", "-f", "content="+enc, "-f", "sha="+str(readme["sha"])); err != nil {
-		return s.partial(repoName, name, actual, err)
-	}
-	if err := s.grantTeam(slug, repoName); err != nil {
-		return s.partial(repoName, name, actual, err)
-	}
-	if err := s.grantStudent(repoName, actual); err != nil {
-		return s.partial(repoName, name, actual, err)
-	}
-	if err := s.SetRepoProperties(repoName, map[string]string{"repo_type": "student", "student_name": name, "github_id": actual}); err != nil {
-		return s.partial(repoName, name, actual, err)
+// RepoName is the default repository name for a student: the classroom's
+// repo_prefix followed by their GitHub login.
+func (s *Service) RepoName(login string) string { return s.C.RepoPrefix + login }
+
+// ValidateRepoName checks a repository name against GitHub's rules.
+func ValidateRepoName(name string) error {
+	if !repoNameRE.MatchString(name) || len(name) > 100 {
+		return fmt.Errorf("invalid repository name '%s' (use letters, digits, '.', '_', '-'; max 100 characters)", name)
 	}
 	return nil
 }
 
-func (s *Service) partial(repo, name, login string, err error) error {
-	return fmt.Errorf("repository %s/%s was created but setup did not finish; repair it with: mgc -apply student create --name %q --github %s --repo %s: %w", s.C.Organization, repo, name, login, repo, err)
+// PartialError reports a repository that was created but whose setup did
+// not finish. Re-running with repair enabled completes it.
+type PartialError struct {
+	Org, Repo, Name, Login string
+	Err                    error
+}
+
+func (e *PartialError) Error() string {
+	return fmt.Sprintf("repository %s/%s was created but setup did not finish; repair it with: mgc --apply student create --name %q --github %s --repo %s: %v", e.Org, e.Repo, e.Name, e.Login, e.Repo, e.Err)
+}
+
+func (e *PartialError) Unwrap() error { return e.Err }
+
+// createNew creates and fully provisions a new student repository without
+// printing anything. Callers are responsible for dry-run handling and
+// for confirming the repository does not already exist.
+func (s *Service) createNew(slug, name, login, repoName string) error {
+	if _, err := s.GH.Run("api", "--method", "POST", fmt.Sprintf("orgs/%s/repos", s.C.Organization), "-f", "name="+repoName, "-f", fmt.Sprintf("description=%s student repository for %s", courseLabel(s.C), name), "-F", "private=true", "-F", "has_issues=false", "-F", "has_projects=false", "-F", "has_wiki=false", "-F", "auto_init=true"); err != nil {
+		return err
+	}
+	partial := func(err error) error {
+		return &PartialError{Org: s.C.Organization, Repo: repoName, Name: name, Login: login, Err: err}
+	}
+	var readme map[string]any
+	if err := s.json(&readme, "api", fmt.Sprintf("repos/%s/%s/contents/README.md", s.C.Organization, repoName)); err != nil {
+		return partial(err)
+	}
+	if err := s.writeReadme(repoName, name, login, str(readme["sha"])); err != nil {
+		return partial(err)
+	}
+	if err := s.grantTeam(slug, repoName); err != nil {
+		return partial(err)
+	}
+	if err := s.grantStudent(repoName, login); err != nil {
+		return partial(err)
+	}
+	if err := s.SetRepoProperties(repoName, map[string]string{"repo_type": "student", "student_name": name, "github_id": login}); err != nil {
+		return partial(err)
+	}
+	return nil
+}
+
+// writeReadme writes the course README. sha is the blob being replaced, or
+// "" to create the file.
+func (s *Service) writeReadme(repoName, name, login, sha string) error {
+	enc := base64.StdEncoding.EncodeToString([]byte(studentReadme(courseLabel(s.C), name, login, s.C.CourseInfoURL)))
+	args := []string{"api", "--method", "PUT", fmt.Sprintf("repos/%s/%s/contents/README.md", s.C.Organization, repoName), "-f", "message=Initialize course README", "-f", "content=" + enc}
+	if sha != "" {
+		args = append(args, "-f", "sha="+sha)
+	}
+	_, err := s.GH.Run(args...)
+	return err
 }
 
 func (s *Service) grantTeam(slug, repo string) error {
@@ -486,46 +550,74 @@ func (s *Service) grantStudent(repo, login string) error {
 	return err
 }
 
-// reconcileStudentRepo checks an existing repository and restores any
-// missing student access, grader-team access, or metadata. Repository
-// contents are never modified.
-func (s *Service) reconcileStudentRepo(repo map[string]any, repoName, slug, name, login string) (string, error) {
+// repairPlan lists what an existing student repository is missing and how
+// to fix each item.
+type repairPlan struct {
+	Todo  []string
+	fixes []func() error
+}
+
+func (p *repairPlan) add(desc string, fix func() error) {
+	p.Todo = append(p.Todo, desc)
+	p.fixes = append(p.fixes, fix)
+}
+
+// Needed reports whether anything needs repairing.
+func (p *repairPlan) Needed() bool { return len(p.Todo) > 0 }
+
+// Apply performs the fixes in order, stopping at the first failure.
+func (p *repairPlan) Apply() error {
+	for i, f := range p.fixes {
+		if err := f(); err != nil {
+			return fmt.Errorf("%s: %w", p.Todo[i], err)
+		}
+	}
+	return nil
+}
+
+// planRepair inspects an existing repository and works out what is needed
+// to finish provisioning it: student access (a pending invitation counts),
+// grader-team access, empty custom properties, and the course README.
+//
+// Student work is never modified. The README is only written when the
+// repository is empty, or when its only commit is GitHub's auto-generated
+// "Initial commit" and the README is still GitHub's "# <repo>" placeholder.
+func (s *Service) planRepair(repoName, slug, name, login string) (*repairPlan, error) {
 	props, err := s.GetRepoProperties(repoName)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if t := props["repo_type"]; t != "" && t != "student" {
-		return "", fmt.Errorf("repository %s exists but is not a student repository (repo_type=%s)", repoName, t)
+		return nil, fmt.Errorf("repository %s exists but is not a student repository (repo_type=%s)", repoName, t)
 	}
 	if owner := props["github_id"]; owner != "" && !strings.EqualFold(owner, login) {
-		return "", fmt.Errorf("repository %s already belongs to GitHub user '%s', not '%s'", repoName, owner, login)
+		return nil, fmt.Errorf("repository %s already belongs to GitHub user '%s', not '%s'", repoName, owner, login)
 	}
 
-	var fixes []func() error
-	var todo []string
+	plan := &repairPlan{}
 
 	collab, err := s.IsCollaborator(repoName, login)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if !collab {
 		pending, err := s.hasPendingInvitation(repoName, login)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if !pending {
-			todo = append(todo, fmt.Sprintf("add student collaborator %s with: %s", login, s.C.StudentPermission))
-			fixes = append(fixes, func() error { return s.grantStudent(repoName, login) })
+			plan.add(fmt.Sprintf("add student collaborator %s with: %s", login, s.C.StudentPermission),
+				func() error { return s.grantStudent(repoName, login) })
 		}
 	}
 
 	_, connected, err := s.TeamRepoPermission(slug, repoName)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if !connected {
-		todo = append(todo, fmt.Sprintf("add team '%s' with: %s", s.C.GraderTeam, s.C.GraderPermission))
-		fixes = append(fixes, func() error { return s.grantTeam(slug, repoName) })
+		plan.add(fmt.Sprintf("add team '%s' with: %s", s.C.GraderTeam, s.C.GraderPermission),
+			func() error { return s.grantTeam(slug, repoName) })
 	}
 
 	missing := map[string]string{}
@@ -540,140 +632,97 @@ func (s *Service) reconcileStudentRepo(repo map[string]any, repoName, slug, name
 			keys = append(keys, k+"="+missing[k])
 		}
 		sort.Strings(keys)
-		todo = append(todo, "set custom properties: "+strings.Join(keys, ", "))
-		fixes = append(fixes, func() error { return s.SetRepoProperties(repoName, missing) })
+		plan.add("set custom properties: "+strings.Join(keys, ", "),
+			func() error { return s.SetRepoProperties(repoName, missing) })
 	}
 
-	if len(todo) == 0 {
+	desc, sha, needed, err := s.readmeNeedsRepair(repoName)
+	if err != nil {
+		return nil, err
+	}
+	if needed {
+		plan.add(desc, func() error { return s.writeReadme(repoName, name, login, sha) })
+	}
+	return plan, nil
+}
+
+// readmeNeedsRepair reports whether the course README is missing from a
+// repository that has no student work in it, and the sha to replace.
+func (s *Service) readmeNeedsRepair(repoName string) (desc, sha string, needed bool, err error) {
+	var commits []map[string]any
+	err = s.json(&commits, "api", fmt.Sprintf("repos/%s/%s/commits?per_page=2", s.C.Organization, repoName))
+	if gh.IsStatus(err, 409) { // "Git Repository is empty"
+		return "add course README", "", true, nil
+	}
+	if err != nil {
+		return "", "", false, err
+	}
+	if len(commits) != 1 {
+		return "", "", false, nil // more history than the auto-init commit: leave it
+	}
+	c, _ := commits[0]["commit"].(map[string]any)
+	if str(c["message"]) != "Initial commit" {
+		return "", "", false, nil
+	}
+	var readme map[string]any
+	err = s.json(&readme, "api", fmt.Sprintf("repos/%s/%s/contents/README.md", s.C.Organization, repoName))
+	if gh.IsNotFound(err) {
+		return "add course README", "", true, nil
+	}
+	if err != nil {
+		return "", "", false, err
+	}
+	raw, _ := base64.StdEncoding.DecodeString(strings.ReplaceAll(str(readme["content"]), "\n", ""))
+	first, _, _ := strings.Cut(strings.TrimSpace(string(raw)), "\n")
+	if strings.TrimSpace(first) != "# "+repoName {
+		return "", "", false, nil
+	}
+	return "replace GitHub placeholder README with course README", str(readme["sha"]), true, nil
+}
+
+// reconcileStudentRepo repairs an existing repository for `student create`,
+// printing what it did.
+func (s *Service) reconcileStudentRepo(repo map[string]any, repoName, slug, name, login string) (string, error) {
+	plan, err := s.planRepair(repoName, slug, name, login)
+	if err != nil {
+		return "", err
+	}
+	if !plan.Needed() {
 		s.printf("SKIP      %s already exists\n          %s\n", repoName, str(repo["html_url"]))
 		return ResultExisting, nil
 	}
 	if !s.Apply {
 		s.printf("DRY RUN   %s already exists; would repair:\n", repoName)
-		for _, t := range todo {
+		for _, t := range plan.Todo {
 			s.printf("          %s\n", t)
 		}
 		return ResultDryRun, nil
 	}
-	for _, f := range fixes {
-		if err := f(); err != nil {
-			return "", err
-		}
+	if err := plan.Apply(); err != nil {
+		return "", err
 	}
 	s.printf("REPAIRED  %s\n", repoName)
-	for _, t := range todo {
+	for _, t := range plan.Todo {
 		s.printf("          %s\n", t)
 	}
 	return ResultRepaired, nil
-}
-
-func nameOr(name, github string) string {
-	if strings.TrimSpace(name) != "" {
-		return strings.TrimSpace(name)
-	}
-	return github
-}
-
-func (s *Service) Batch(path, githubColumn, nameColumn, repoColumn string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("could not open CSV %s: %w", path, err)
-	}
-	defer f.Close()
-
-	r := csv.NewReader(f)
-	r.FieldsPerRecord = -1 // tolerate ragged rows from spreadsheet exports
-	headers, err := r.Read()
-	if err != nil {
-		return fmt.Errorf("could not read CSV header: %w", err)
-	}
-
-	index := make(map[string]int, len(headers))
-	for i, h := range headers {
-		if i == 0 {
-			h = strings.TrimPrefix(h, "\ufeff") // Excel/LMS exports often start with a BOM
-		}
-		index[strings.TrimSpace(h)] = i
-	}
-	for _, required := range []string{githubColumn, nameColumn} {
-		if _, ok := index[required]; !ok {
-			return fmt.Errorf("CSV column '%s' was not found; available columns: %s", required, strings.Join(headers, ", "))
-		}
-	}
-	if repoColumn != "" {
-		if _, ok := index[repoColumn]; !ok {
-			return fmt.Errorf("CSV column '%s' was not found; available columns: %s", repoColumn, strings.Join(headers, ", "))
-		}
-	}
-
-	s.printf("Processing students from %s\n\n", path)
-	counts := map[string]int{}
-	row := 1
-	for {
-		rec, readErr := r.Read()
-		if readErr == io.EOF {
-			break
-		}
-		row++
-		if readErr != nil {
-			counts["error"]++
-			s.printf("ERROR     row %d: could not read row: %v\n\n", row, readErr)
-			continue
-		}
-
-		cell := func(column string) string {
-			i := index[column]
-			if i >= len(rec) {
-				return ""
-			}
-			return strings.TrimSpace(rec[i])
-		}
-		github := cell(githubColumn)
-		name := cell(nameColumn)
-		repo := ""
-		if repoColumn != "" {
-			repo = cell(repoColumn)
-		}
-
-		if github == "" {
-			counts["blank"]++
-			s.printf("BLANK     row %d: no GitHub username\n\n", row)
-			continue
-		}
-
-		result, err := s.CreateStudentRepo(nameOr(name, github), github, repo)
-		if err != nil {
-			counts["error"]++
-			s.printf("ERROR     row %d (%s): %v\n\n", row, nameOr(name, github), err)
-			continue
-		}
-		counts[result]++
-		s.println()
-	}
-
-	s.println("Batch summary")
-	s.printf("  Created:  %d\n", counts[ResultCreated])
-	s.printf("  Repaired: %d\n", counts[ResultRepaired])
-	s.printf("  Existing: %d\n", counts[ResultExisting])
-	s.printf("  Dry run:  %d\n", counts[ResultDryRun])
-	s.printf("  Errors:   %d\n", counts["error"])
-	s.printf("  Blank:    %d\n", counts["blank"])
-	return nil
 }
 
 // ---------------------------------------------------------------- student inspection
 
 // findStudentRepo locates a student repository by GitHub ID (custom
 // property) or repository name, case-insensitively.
-func findStudentRepo(repos []map[string]any, query string) (map[string]any, bool) {
+func findStudentRepo(repos []map[string]any, query, prefix string) (map[string]any, bool) {
 	for _, r := range repos {
 		if isStudentRepo(r) && strings.EqualFold(repoProps(r)["github_id"], query) {
 			return r, true
 		}
 	}
-	for _, r := range repos {
-		if strings.EqualFold(str(r["name"]), query) && str(r["name"]) != "" {
-			return r, true
+	for _, name := range []string{query, prefix + query} {
+		for _, r := range repos {
+			if n := str(r["name"]); n != "" && strings.EqualFold(n, name) {
+				return r, true
+			}
 		}
 	}
 	return nil, false
@@ -686,7 +735,7 @@ func (s *Service) StudentInfo(query string) error {
 	if err != nil {
 		return err
 	}
-	repo, found := findStudentRepo(repos, query)
+	repo, found := findStudentRepo(repos, query, s.C.RepoPrefix)
 
 	login := query
 	if found {
@@ -708,7 +757,7 @@ func (s *Service) StudentInfo(query string) error {
 	}
 	s.printf("Student:      %s\nGitHub:       %s\nGitHub URL:   %s\n", name, login, str(u["html_url"]))
 	if !found {
-		s.printf("Repository:   NOT CREATED (%s/%s)\n", s.C.Organization, login)
+		s.printf("Repository:   NOT CREATED (%s/%s)\n", s.C.Organization, s.RepoName(login))
 		return nil
 	}
 	repoName := str(repo["name"])
@@ -725,13 +774,17 @@ func (s *Service) StudentInfo(query string) error {
 			s.printf("Grader team:  %s (NOT CONNECTED)\n", s.C.GraderTeam)
 		}
 	}
-	invs, _ := s.PendingInvitations(repoName)
+	invs, _ := s.repoInvites(repo)
 	if len(invs) == 0 {
 		s.println("Pending inv.: none")
 	} else {
 		s.printf("Pending inv.: %d\n", len(invs))
-		for _, inv := range invs {
-			s.printf("              %s\n", invitee(inv))
+		for _, i := range invs {
+			if i.Expired {
+				s.printf("              %s  EXPIRED (must be invited again)\n", i.Login)
+			} else {
+				s.printf("              %s  %s  accept at: %s\n", i.Login, inviteStatus(i), i.URL)
+			}
 		}
 	}
 	return nil
@@ -832,5 +885,6 @@ func (s *Service) Doctor(active string) error {
 		s.printf("Grader team:     NOT CREATED (%s)\n", s.C.GraderTeam)
 	}
 	s.printf("Course info URL: %s\n", s.C.CourseInfoURL)
+	s.printf("Repo names:      %s<github-id>\n", s.C.RepoPrefix)
 	return nil
 }

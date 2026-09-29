@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ArchitectingSoftware/my-gh-classroom/internal/config"
 	"github.com/ArchitectingSoftware/my-gh-classroom/internal/course"
@@ -55,7 +56,7 @@ var rootCmd = &cobra.Command{
 		}
 		if alias == "" {
 			fmt.Println("WARNING: No default classroom is configured.")
-			return fmt.Errorf("no classroom selected and no default classroom is configured; use --classroom/-cr or set a default")
+			return fmt.Errorf("no classroom selected and no default classroom is configured; use --classroom/-c or set a default")
 		}
 		alias, cl, err := cfg.ClassroomWithAlias(alias)
 		if err != nil {
@@ -70,10 +71,11 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() {
-	// pflag only permits a single-character shorthand. We intentionally support
-	// the more readable legacy forms -cr and -apply by normalizing them to
-	// their long-form equivalents before Cobra/pflag parses the arguments.
-	rootCmd.SetArgs(normalizeArgs(os.Args[1:]))
+	if err := rejectLegacyArgs(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "ERROR:", err)
+		os.Exit(1)
+	}
+	rootCmd.SetArgs(os.Args[1:])
 
 	if err := rootCmd.Execute(); err != nil {
 		if !errors.Is(err, errUsageShown) {
@@ -83,28 +85,35 @@ func Execute() {
 	}
 }
 
-// normalizeArgs rewrites -cr and -apply to their long forms. Arguments after
-// a bare "--" are left untouched.
-func normalizeArgs(in []string) []string {
-	out := make([]string, len(in))
-	copy(out, in)
-	for i, a := range out {
+// legacyFlags maps retired single-dash spellings to their replacements.
+// Without this check pflag would parse them as clusters of shorthand flags
+// ("-cr" as -c r, "-apply" as -a pply) and report confusing errors, or
+// worse, silently treat "-cr" as -c with a value of "r".
+var legacyFlags = map[string]string{
+	"-apply": "--apply or -a",
+	"-cr":    "--classroom or -c",
+}
+
+// rejectLegacyArgs reports the first retired flag spelling in args.
+func rejectLegacyArgs(in []string) error {
+	for _, a := range in {
 		if a == "--" {
 			break
 		}
-		switch a {
-		case "-cr":
-			out[i] = "--classroom"
-		case "-apply":
-			out[i] = "--apply"
+		name := a
+		if i := strings.IndexByte(a, '='); i > 0 {
+			name = a[:i]
+		}
+		if repl, ok := legacyFlags[name]; ok {
+			return fmt.Errorf("%s is no longer supported; use %s", name, repl)
 		}
 	}
-	return out
+	return nil
 }
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "Path to config.json (default: $MGC_CONFIG, ./config.json, or ~/.config/mgc/config.json)")
 	rootCmd.PersistentFlags().BoolVarP(&apply, "apply", "a", false, "Actually perform a mutating operation; otherwise mutating commands are dry-run")
-	rootCmd.PersistentFlags().StringVar(&classroomAlias, "classroom", "", "Classroom alias to use; defaults to configured default classroom")
+	rootCmd.PersistentFlags().StringVarP(&classroomAlias, "classroom", "c", "", "Classroom alias to use; defaults to configured default classroom")
 	rootCmd.AddCommand(doctorCmd(), teamCmd(), studentCmd(), propertiesCmd(), classroomCmd())
 }

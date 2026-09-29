@@ -1,12 +1,13 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
 
-	"github.com/ArchitectingSoftware/my-gh-classroom/internal/canvas"
 	"github.com/ArchitectingSoftware/my-gh-classroom/internal/course"
+	"github.com/ArchitectingSoftware/my-gh-classroom/internal/roster"
 	"github.com/spf13/cobra"
 )
 
@@ -15,29 +16,53 @@ import (
 var resultsFile = "import-results.txt"
 
 func importCmd() *cobra.Command {
-	var number int
+	var (
+		number       int
+		nameColumn   string
+		githubColumn string
+		repair       bool
+	)
 	c := &cobra.Command{
-		Use:   "import CANVAS_CSV",
-		Short: "Create student repositories from a Canvas export",
-		Long: `Create a repository for every student in a Canvas export who does not
-already have one. The CSV must contain "Name" and "GitHub-ID" columns;
-other columns are ignored.
+		Use:   "import ROSTER_CSV",
+		Short: "Create student repositories from a CSV roster",
+		Long: `Create a repository for every student in a CSV roster who does not
+already have one.
+
+The CSV's header row must include these columns (exact spelling):
+
+  Name        the student's name, e.g. "Jane Smith"
+  GitHub-ID   the student's GitHub username, e.g. "jsmith42"
+
+If your file uses different headers, name them with --name-column and
+--github-column. Any other columns are ignored, and column order does
+not matter, so an LMS export (such as a Canvas survey "Student Analysis"
+CSV) can be used as-is. The file is checked for both columns before
+GitHub is contacted.
+
+Each repository is named <repo_prefix><GitHub ID>, where repo_prefix is
+set per classroom in config.json (default: no prefix).
 
 This is an upsert: students who already have a repository are skipped
 and nothing about their repository is changed, so the same file can be
-imported repeatedly. Like other mgc commands it is a dry run unless
--apply is given.
+imported repeatedly. With --repair, existing repositories are checked
+instead and anything missing is fixed: student access, grader-team
+access, custom properties, and the course README (only while the
+repository still has nothing but GitHub's initial commit). Student work
+is never modified. Like other mgc commands this is a dry run unless
+--apply is given.
 
 A report is printed as students are processed and also written to
 ` + resultsFile + ` in the current directory (overwritten each run).`,
-		Example: `  mgc classroom import Canvas-Export.csv            # dry run, whole file
-  mgc classroom import Canvas-Export.csv -n 2       # dry run, first 2 students
-  mgc -apply classroom import Canvas-Export.csv     # create repositories
-  mgc -cr cs281 -apply classroom import roster.csv  # a non-default classroom`,
+		Example: `  mgc classroom import roster.csv                   # dry run, whole file
+  mgc classroom import roster.csv -n 2              # dry run, first 2 students
+  mgc --apply classroom import roster.csv           # create repositories
+  mgc --apply classroom import roster.csv --repair  # create, and fix incomplete repos
+  mgc classroom import export.csv --name-column Student --github-column "GitHub Username"
+  mgc -c cs281 --apply classroom import roster.csv  # a non-default classroom`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			switch len(args) {
 			case 0:
-				fmt.Fprintln(os.Stderr, "WARNING: no Canvas CSV file specified.")
+				fmt.Fprintln(os.Stderr, "WARNING: no roster CSV file specified.")
 				fmt.Fprintln(os.Stderr)
 				cmd.SetOut(os.Stderr)
 				_ = cmd.Usage()
@@ -53,8 +78,11 @@ A report is printed as students are processed and also written to
 				return fmt.Errorf("--number must be a positive number of records, got %d", number)
 			}
 			path := args[0]
-			students, err := canvas.ReadFile(path, number)
+			students, err := roster.ReadFile(path, roster.Options{Limit: number, NameColumn: nameColumn, GitHubColumn: githubColumn})
 			if err != nil {
+				if errors.Is(err, roster.ErrMissingColumns) {
+					return fmt.Errorf("%s: %w\nuse --name-column/--github-column if your headers differ; see: mgc classroom import --help", path, err)
+				}
 				return fmt.Errorf("%s: %w", path, err)
 			}
 			if len(students) == 0 {
@@ -68,10 +96,13 @@ A report is printed as students are processed and also written to
 			defer f.Close()
 
 			sum, err := svc.ImportStudents(students, course.ImportMeta{
-				File:      path,
-				Classroom: activeClassroom,
-				Limit:     number,
-				Started:   time.Now(),
+				File:         path,
+				Classroom:    activeClassroom,
+				Limit:        number,
+				NameColumn:   nameColumn,
+				GitHubColumn: githubColumn,
+				Repair:       repair,
+				Started:      time.Now(),
 			}, f)
 			fmt.Printf("\nResults written to %s\n", resultsFile)
 			if err != nil {
@@ -84,5 +115,8 @@ A report is printed as students are processed and also written to
 		},
 	}
 	c.Flags().IntVarP(&number, "number", "n", 0, "Process only the first N students in the file (default: all)")
+	c.Flags().StringVar(&nameColumn, "name-column", roster.NameColumn, "CSV column containing student names")
+	c.Flags().StringVar(&githubColumn, "github-column", roster.GitHubColumn, "CSV column containing GitHub usernames")
+	c.Flags().BoolVar(&repair, "repair", false, "Check existing repositories and fix anything missing instead of skipping them")
 	return c
 }

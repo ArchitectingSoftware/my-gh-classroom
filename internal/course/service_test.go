@@ -4,8 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -173,15 +171,18 @@ func TestCreateStudentRepoPartialFailureSaysRerun(t *testing.T) {
 		fail("PUT", repoPath("jsmith42", "collaborators/jsmith42"), errors.New("boom"))
 
 	_, err := s.CreateStudentRepo("Jane", "jsmith42", "")
-	if err == nil || !strings.Contains(err.Error(), "repair it with: mgc -apply student create") {
+	if err == nil || !strings.Contains(err.Error(), "repair it with: mgc --apply student create --name \"Jane\" --github jsmith42 --repo jsmith42") {
 		t.Fatalf("err = %v, want re-run hint", err)
 	}
 }
 
 // ---------------------------------------------------------------- reconcile existing repos
 
+// existingRepo registers a repository that already has history beyond
+// GitHub's initial commit, so the README is never a repair candidate.
 func existingRepo(f *fakeGH, repo string) *fakeGH {
-	return f.on("GET", repoPath(repo, ""), `{"name":"`+repo+`","html_url":"https://github.com/`+org+`/`+repo+`"}`)
+	return f.on("GET", repoPath(repo, ""), `{"name":"`+repo+`","html_url":"https://github.com/`+org+`/`+repo+`"}`).
+		on("GET", repoPath(repo, "commits?per_page=2"), `[{"commit":{"message":"Initialize course README"}},{"commit":{"message":"Initial commit"}}]`)
 }
 
 func TestExistingFullyProvisionedRepoIsSkipped(t *testing.T) {
@@ -313,60 +314,6 @@ func TestExistingNonStudentRepoRefused(t *testing.T) {
 		on("GET", repoPath("course-info", "properties/values"), `[{"property_name":"repo_type","value":"course"}]`)
 	_, err := s.CreateStudentRepo("Jane", "jsmith42", "course-info")
 	if err == nil || !strings.Contains(err.Error(), "not a student repository") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-// ---------------------------------------------------------------- batch
-
-func writeCSV(t *testing.T, content string) string {
-	t.Helper()
-	p := filepath.Join(t.TempDir(), "students.csv")
-	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
-func TestBatchDryRun(t *testing.T) {
-	s, f, out := newService(t, false)
-	f.team().
-		user("alice1").fail("GET", repoPath("alice1", ""), errNotFound).
-		fail("GET", "users/ghost", errNotFound)
-	existingRepo(f.user("bob2"), "bob2").
-		on("GET", repoPath("bob2", "properties/values"), `[{"property_name":"repo_type","value":"student"},{"property_name":"student_name","value":"Bob"},{"property_name":"github_id","value":"bob2"}]`).
-		on("GET", repoPath("bob2", "collaborators/bob2"), ``).
-		on("GET", teamRepoPath("bob2"), `{"role_name":"write"}`)
-
-	// BOM on the first header, a blank GitHub cell, a short (ragged) row,
-	// and an unknown user.
-	csv := "\ufeffStudent,GitHub Username,Section\n" +
-		"Alice,alice1,001\n" +
-		"Bob,bob2,001\n" +
-		"Carol,,002\n" +
-		"Dan\n" +
-		"Ghost,ghost,003\n"
-	if err := s.Batch(writeCSV(t, csv), "GitHub Username", "Student", ""); err != nil {
-		t.Fatal(err)
-	}
-	o := out.String()
-	for _, want := range []string{
-		"Dry run:  1", "Existing: 1", "Blank:    2", "Errors:   1", "Created:  0",
-		"BLANK     row 4", "BLANK     row 5", "ERROR     row 6 (Ghost)",
-	} {
-		if !strings.Contains(o, want) {
-			t.Errorf("output missing %q:\n%s", want, o)
-		}
-	}
-	if m := f.mutations(); len(m) != 0 {
-		t.Errorf("dry-run batch performed mutations: %v", m)
-	}
-}
-
-func TestBatchMissingColumn(t *testing.T) {
-	s, _, _ := newService(t, false)
-	err := s.Batch(writeCSV(t, "Name,Login\nA,a\n"), "GitHub Username", "Student", "")
-	if err == nil || !strings.Contains(err.Error(), "available columns: Name, Login") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -506,7 +453,8 @@ func TestRemoveTeamMemberIsCaseInsensitive(t *testing.T) {
 
 func TestRemoveTeamMemberNotMember(t *testing.T) {
 	s, f, out := newService(t, true)
-	f.team().on("GET", "orgs/"+org+"/teams/graders/members", `[{"login":"someone"}]`)
+	f.team().on("GET", "orgs/"+org+"/teams/graders/members", `[{"login":"someone"}]`).
+		on("GET", "orgs/"+org+"/teams/graders/invitations", `[]`)
 	if err := s.RemoveTeamMember("graders", "ta-alice"); err != nil {
 		t.Fatal(err)
 	}

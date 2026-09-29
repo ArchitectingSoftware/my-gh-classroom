@@ -17,14 +17,14 @@ The utility uses the official GitHub CLI (`gh`) for authentication and
 GitHub API access. It does not store GitHub credentials.
 
 > **Safety:** commands that change configuration or GitHub are **dry-run
-> by default**. Pass `--apply` or `-apply` explicitly to perform a
+> by default**. Pass `--apply` (or `-a`) explicitly to perform a
 > mutation.
 
 ## Features
 
 - Manage multiple classrooms from one installation.
 - Give each classroom a short local alias such as `cs472` or `cs281`.
-- Select a classroom globally with `--classroom` or `-cr`.
+- Select a classroom globally with `--classroom` or `-c`.
 - Configure a default classroom for commands where no classroom is
   specified.
 - Create, list, delete, select, and verify classroom configurations.
@@ -37,9 +37,12 @@ GitHub API access. It does not store GitHub credentials.
   properties.
 - Find students by name, GitHub ID, or repository name.
 - Inspect student repository permissions and pending invitations.
-- Import students from a Canvas export (`classroom import`), as a
+- Report pending invitations with the URL each student can use to
+  accept, for the whole class or one student (`student invites`).
+- Show TAs and graders who have not accepted their organization
+  invitation, with the accept URL (`team invites`, `team list`).
+- Import students from any CSV roster (`classroom import`), as a
   repeatable upsert with an on-screen and saved report.
-- Batch-provision students from generic CSV data.
 - Safely skip existing student repositories rather than overwrite
   student work, while repairing any missing access or metadata.
 
@@ -208,7 +211,9 @@ A configuration can therefore look like:
       "grader_permission": "push",
       "student_permission": "push",
       "course_info_repo": "course-info",
-      "course_info_url": "https://github.com/CS472-Net-WI26/course-info"
+      "course_info_url": "https://github.com/CS472-Net-WI26/course-info",
+      "course_name": "CS472",
+      "repo_prefix": ""
     },
     "cs281": {
       "organization": "CS281-Arch-FA26",
@@ -217,7 +222,8 @@ A configuration can therefore look like:
       "student_permission": "push",
       "course_info_repo": "course-info",
       "course_info_url": "https://github.com/CS281-Arch-FA26/course-info",
-      "course_name": "CS281"
+      "course_name": "CS281",
+      "repo_prefix": "cs281-"
     }
   }
 }
@@ -234,9 +240,10 @@ A configuration can therefore look like:
 | `course_info_repo`   | Shared course-information repository.                          |
 | `course_info_url`    | URL inserted into each student’s initial README.               |
 | `course_name`        | Optional course label for repo descriptions and READMEs. Defaults to the upper-cased alias. |
+| `repo_prefix`        | Optional prefix for student repository names: `cs281-` gives `cs281-jsmith42`. Defaults to none. |
 
 `default_classroom` contains the classroom alias used when
-`--classroom`/`-cr` is not supplied.
+`--classroom`/`-c` is not supplied.
 
 ## Classroom Management
 
@@ -259,7 +266,7 @@ Preview:
 Apply:
 
 ``` bash
-./mgc -apply classroom create cs281
+./mgc --apply classroom create cs281
 ```
 
 Creating a classroom changes only the local configuration. It does
@@ -274,7 +281,9 @@ A new classroom is created with obvious placeholder values:
   "grader_permission": "push",
   "student_permission": "push",
   "course_info_repo": "YOUR_COURSE_INFO_REPO",
-  "course_info_url": "https://github.com/YOUR_GITHUB_ORGANIZATION/YOUR_COURSE_INFO_REPO"
+  "course_info_url": "https://github.com/YOUR_GITHUB_ORGANIZATION/YOUR_COURSE_INFO_REPO",
+  "course_name": "CS281",
+  "repo_prefix": ""
 }
 ```
 
@@ -313,7 +322,7 @@ Preview changing it:
 Apply:
 
 ``` bash
-./mgc -apply classroom default cs281
+./mgc --apply classroom default cs281
 ```
 
 The default is persisted in `config.json`.
@@ -332,7 +341,7 @@ Preview:
 Apply:
 
 ``` bash
-./mgc -apply classroom delete cs281
+./mgc --apply classroom delete cs281
 ```
 
 **This removes only the classroom entry from `config.json`. It does not
@@ -355,10 +364,10 @@ Or explicitly select one:
 The convenience form is:
 
 ``` bash
-./mgc -cr cs472 student list
+./mgc -c cs472 student list
 ```
 
-`-cr` is accepted as a convenience alias for `--classroom`.
+`-c` is the short form of `--classroom`.
 
 Classroom-scoped commands print the active classroom and GitHub
 organization so it is clear which course is being administered.
@@ -379,7 +388,7 @@ classroom selection, and the configured GitHub resources.
 If a classroom is explicitly selected:
 
 ``` bash
-./mgc -cr cs281 doctor
+./mgc -c cs281 doctor
 ```
 
 the selected classroom is checked instead of the default.
@@ -399,7 +408,7 @@ previews the operation.
 To perform it:
 
 ``` bash
-./mgc -apply team create graders
+./mgc --apply team create graders
 ```
 
 The long form is also supported:
@@ -416,20 +425,40 @@ Create the configured grader team:
 
 ``` bash
 ./mgc team create graders
-./mgc -apply team create graders
+./mgc --apply team create graders
 ```
 
 Add an instructor or TA:
 
 ``` bash
 ./mgc team add graders GITHUB_ID
-./mgc -apply team add graders GITHUB_ID
+./mgc --apply team add graders GITHUB_ID
 ```
 
-List graders:
+If the person is not already in the organization, GitHub sends them an
+organization invitation, and they are not on the team until they accept.
+`team add` reports this as `INVITED` and prints the page where they
+accept:
+
+``` text
+INVITED   ta-bo to 'graders'; they must accept the organization invitation
+          accept at: https://github.com/orgs/CS472-Net-WI26/invitation (signed in as ta-bo)
+```
+
+Running `team add` again for someone whose invitation is still pending
+is skipped, and the accept URL is shown again.
+
+List graders, including people who have been invited but have not yet
+accepted:
 
 ``` bash
 ./mgc team list graders
+```
+
+``` text
+Members of CS472-Net-WI26/graders (1 active, 1 invited):
+  ta-al
+  ta-bo                    invited, 6d left
 ```
 
 Inspect the team:
@@ -442,8 +471,47 @@ Remove a grader:
 
 ``` bash
 ./mgc team remove graders GITHUB_ID
-./mgc -apply team remove graders GITHUB_ID
+./mgc --apply team remove graders GITHUB_ID
 ```
+
+For someone who has not yet accepted, `team remove` cancels their
+pending invitation instead. This cancels their organization invitation
+as a whole.
+
+### Lost TA and grader invitations
+
+GitHub does not re-send the invitation email. When a TA or grader loses
+it, send them the organization invitation page:
+
+``` text
+https://github.com/orgs/<organization>/invitation
+```
+
+They must be signed in to the invited GitHub account. To see everyone
+on the grader team who has not accepted yet:
+
+``` bash
+./mgc team invites
+```
+
+``` text
+Pending invitations to CS472-Net-WI26/graders (2, 1 expired or failed):
+
+  GITHUB ID / EMAIL              STATUS             ACCEPT AT
+  ta-bo                          pending, 6d left   https://github.com/orgs/CS472-Net-WI26/invitation
+  ta-cy                          EXPIRED            (invite again)
+```
+
+Or one person, by GitHub username or invited email:
+
+``` bash
+./mgc team invites ta-bo
+```
+
+`--team NAME` reports on a team other than the classroom's
+`grader_team`. Like student invitations, these expire after 7 days;
+expired or failed invitations get no URL because the person has to be
+invited again.
 
 The grader team must exist before members can be added. `mgc`
 deliberately avoids silently creating prerequisites as side effects.
@@ -456,7 +524,7 @@ All of these commands operate on the active classroom, so another
 classroom can be targeted with:
 
 ``` bash
-./mgc -cr cs281 team list graders
+./mgc -c cs281 team list graders
 ```
 
 ## Repository Custom Properties
@@ -477,7 +545,7 @@ Set up the property schema for the active classroom:
 
 ``` bash
 ./mgc properties setup
-./mgc -apply properties setup
+./mgc --apply properties setup
 ```
 
 List the schema:
@@ -528,16 +596,20 @@ Preview:
 Apply:
 
 ``` bash
-./mgc -apply student create \
+./mgc --apply student create \
   --name "Jane Smith" \
   --github jsmith42
 ```
 
-By default, the student’s GitHub ID becomes the repository name:
+By default the repository is named after the student’s GitHub ID,
+preceded by the classroom’s `repo_prefix` if one is configured:
 
 ``` text
-jsmith42
+jsmith42            (no repo_prefix)
+cs281-jsmith42      (repo_prefix "cs281-")
 ```
+
+`--repo NAME` overrides the name for one student.
 
 For a new repository, `mgc`:
 
@@ -550,12 +622,19 @@ For a new repository, `mgc`:
 7.  grants the student access (which sends the invitation); and
 8.  assigns searchable student metadata.
 
-If the repository already exists, its contents are never touched. `mgc`
-instead checks that the student has access (or a pending invitation),
-that the grader team is connected, and that the custom properties are
-set, and repairs whatever is missing. If an earlier run failed partway
-through, re-running the same command finishes the setup. The initial
-README is only written when the repository is first created.
+If the repository already exists, `mgc` checks it and repairs whatever
+is missing:
+
+- the student has access (a pending invitation counts);
+- the grader team is connected;
+- the custom properties are set (only empty ones are filled); and
+- the course README is present, **only** if the repository is empty or
+  its sole commit is GitHub’s auto-generated “Initial commit” with the
+  placeholder `# <repo>` README.
+
+Student work is never modified: once a repository has any other commit,
+its contents are left alone. If an earlier run failed partway through,
+re-running the same command finishes the setup.
 
 `mgc` refuses to reuse an existing repository whose `github_id` property
 names a different student, or whose `repo_type` is not `student`.
@@ -563,7 +642,7 @@ names a different student, or whose `repo_type` is not `student`.
 To provision into a non-default classroom:
 
 ``` bash
-./mgc -cr cs281 -apply student create \
+./mgc -c cs281 --apply student create \
   --name "Jane Smith" \
   --github jsmith42
 ```
@@ -614,38 +693,75 @@ repositories with `repo_type=student`.
 You can search another classroom explicitly:
 
 ``` bash
-./mgc -cr cs281 student find "Smith"
+./mgc -c cs281 student find "Smith"
 ```
 
-## Importing Students from Canvas
+## Importing Students from a CSV Roster
 
-`classroom import` provisions students from a Canvas survey export:
+`classroom import` provisions students from a CSV file:
 
 ``` bash
-./mgc classroom import Canvas-Export.csv            # dry run, whole file
-./mgc classroom import Canvas-Export.csv -n 2       # dry run, first 2 students
-./mgc -apply classroom import Canvas-Export.csv     # create repositories
-./mgc -cr cs281 -apply classroom import roster.csv  # a non-default classroom
+./mgc classroom import roster.csv                   # dry run, whole file
+./mgc classroom import roster.csv -n 2              # dry run, first 2 students
+./mgc --apply classroom import roster.csv           # create repositories
+./mgc --apply classroom import roster.csv --repair  # create, and fix incomplete repos
+./mgc -c cs281 --apply classroom import roster.csv  # a non-default classroom
 ```
 
-The CSV must have a `Name` column (e.g. `Jane Smith`) and a `GitHub-ID`
-column. Other columns are ignored. The file is checked for both columns
-before anything is sent to GitHub. Running `classroom import` with no
-file prints a warning and usage.
+### Roster format
+
+By default the header row must include these two columns, spelled
+exactly:
+
+| Column      | Contents                                  |
+|-------------|-------------------------------------------|
+| `Name`      | Student name, e.g. `Jane Smith`           |
+| `GitHub-ID` | Student GitHub username, e.g. `jsmith42`  |
+
+If your file uses different headers, name them instead:
+
+``` bash
+./mgc classroom import export.csv --name-column Student --github-column "GitHub Username"
+```
+
+Any other columns are ignored and column order does not matter, so an
+LMS export can be used unchanged (see
+[Suggested Canvas Workflow](#suggested-canvas-workflow)). A minimal
+roster is just:
+
+``` text
+Name,GitHub-ID
+Jane Smith,jsmith42
+Bob Baker,bbaker
+```
+
+The file is checked for both columns before anything is sent to
+GitHub. `./mgc classroom import --help` lists the required columns.
+
+Each new repository is named `<repo_prefix><GitHub ID>` using the
+classroom’s `repo_prefix` (see [Classroom Settings](#classroom-settings)).
+Running `classroom import` with no file prints a warning and usage.
 
 `-n`/`--number N` processes only the first N students, which is handy
 for trying things out. Without it the whole file is processed.
 
-Import is an **upsert**. A student who already has a repository, found
-by the `github_id` custom property or by a repository named after their
-GitHub ID, is skipped and their repository is not changed in any way.
-The same export can be imported again and again as more students fill
-in the survey. The same GitHub ID appearing twice in the file is only
-processed once.
+Import is an **upsert**. A student who already has a repository is
+skipped and their repository is not changed in any way. Existing
+repositories are found by the `github_id` custom property, then by
+`<repo_prefix><GitHub ID>`, then by the bare GitHub ID (a repository
+created before a prefix was configured). The same export can be
+imported again and again as more students fill in the survey. The same
+GitHub ID appearing twice in the file is only processed once.
+
+With `--repair`, existing repositories are checked instead of skipped,
+and anything missing is fixed exactly as described in
+[Creating a Student Repository](#creating-a-student-repository). Like
+everything else, `--repair` is a dry run without `--apply`, so
+`./mgc classroom import roster.csv --repair` shows what would be fixed.
 
 Before processing students, import checks that the grader team exists
 and the custom-property schema is set up. A missing team stops the run.
-Missing properties stop an `-apply` run and produce a warning in a dry
+Missing properties stop an `--apply` run and produce a warning in a dry
 run.
 
 Common entry mistakes are cleaned up: a leading `@` or a full
@@ -660,11 +776,13 @@ A report is printed as each student is processed:
 [ 1/44] Jane Smith                   jsmith42               CREATING     SUCCESS  https://github.com/CS472-Net-WI26/jsmith42
 [ 2/44] Bob Baker                    bbaker                 SKIPPING     SUCCESS  repository exists: https://github.com/CS472-Net-WI26/bbaker
 [ 3/44] Carol Chen                   cchen-typo             CHECKING     ERROR    GitHub user 'cchen-typo' does not exist
+[ 4/44] Dave Diaz                    dave                   REPAIRING    SUCCESS  dave: set custom properties: github_id=dave, ...
 ```
 
-The statuses are `CREATING`, `WOULD CREATE` (dry run), `SKIPPING`, and
-`CHECKING` (the student failed validation before any action). A summary
-follows, with any errors repeated alongside their CSV row numbers.
+The statuses are `CREATING` / `WOULD CREATE`, `REPAIRING` /
+`WOULD REPAIR` (with `--repair`), `SKIPPING`, and `CHECKING` (the
+student failed validation before any action). A summary follows, with
+any errors repeated alongside their CSV row numbers.
 
 The same report is written to `import-results.txt` in the current
 directory, which is overwritten on each run. It contains student names,
@@ -672,35 +790,13 @@ so it is listed in `.gitignore`. The command exits non-zero if any
 student had an error.
 
 If a repository is created but a later setup step fails, the error line
-includes the `mgc -apply student create ...` command that finishes the
-setup. Because import never modifies existing repositories, use that
-command (not another import) to repair it.
-
-## Batch Student Provisioning
-
-Generic CSV provisioning, with configurable column names, is also
-available:
+says so and the run continues with the next student. Re-run with
+`--repair` to finish it:
 
 ``` bash
-./mgc student create-batch students.csv \
-  --github-column "GitHub Username" \
-  --name-column "Student"
+./mgc classroom import roster.csv --repair          # review what will be fixed
+./mgc --apply classroom import roster.csv --repair
 ```
-
-Review the dry run, then apply:
-
-``` bash
-./mgc -apply student create-batch students.csv \
-  --github-column "GitHub Username" \
-  --name-column "Student"
-```
-
-Existing repositories are skipped (and repaired if needed), so the same
-CSV can be processed repeatedly as students complete setup. A UTF-8 BOM
-on the header row and short rows are tolerated.
-
-Unlike `classroom import`, `create-batch` repairs missing access and
-metadata on existing repositories.
 
 ## Suggested Canvas Workflow
 
@@ -712,24 +808,63 @@ A simple workflow is:
     university ID or email address.
 3.  Ask students to visit GitHub and verify that they can log into the
     account before submitting.
-4.  Export the Canvas Student Analysis results as CSV.
+4.  Export the Canvas Student Analysis results as CSV. Check the header
+    row: if the GitHub column is headed with the question text rather
+    than `GitHub-ID`, rename it or pass `--github-column "<header>"`.
 5.  Run `./mgc classroom import Canvas-Export.csv` (a dry run) and
     review the report, especially any `ERROR` lines.
 6.  Optionally try a couple of students for real:
-    `./mgc -apply classroom import Canvas-Export.csv -n 2`.
-7.  Run `./mgc -apply classroom import Canvas-Export.csv`.
+    `./mgc --apply classroom import Canvas-Export.csv -n 2`.
+7.  Run `./mgc --apply classroom import Canvas-Export.csv`.
 8.  Re-export and re-run later for students who were absent or had
-    account problems. Students already provisioned are skipped.
+    account problems. Students already provisioned are skipped. If the
+    report shows any setup errors, add `--repair`.
 
 ## Student Invitations
 
 When a student is added as a collaborator to a private repository,
-GitHub handles its normal repository invitation/notification flow.
+GitHub emails them an invitation, and they must accept it before they
+can use the repository. GitHub does **not** re-send that email, so when
+a student loses or ignores it, send them the page where they can accept
+directly:
 
-Students must accept the invitation before using the repository.
+``` text
+https://github.com/<organization>/<repository>/invitations
+```
 
-If a student loses the invitation email, have them sign into the GitHub
-account they supplied and check their GitHub notifications.
+They must be signed in to the GitHub account that was invited.
+
+`mgc` can list these for you. For everyone in the classroom with a
+pending invitation, sorted by student name:
+
+``` bash
+./mgc student invites
+```
+
+``` text
+Pending repository invitations in CS472-Net-WI26 (3, 1 expired):
+
+  STUDENT                      GITHUB ID              STATUS             ACCEPT AT
+  Alice Anders                 alice1                 pending, 6d left   https://github.com/CS472-Net-WI26/alice1/invitations
+  Bob Baker                    bbaker                 pending, 2d left   https://github.com/CS472-Net-WI26/bbaker/invitations
+  Dave Diaz                    dave                   EXPIRED            (expired: invite again)
+```
+
+For one student, by GitHub ID or repository name:
+
+``` bash
+./mgc student invites jsmith42
+```
+
+This shows when the invitation was sent, when it expires, and the
+accept URL, or tells you the student has already accepted. Students who
+have accepted do not appear in the organization-wide list.
+`./mgc student info` also shows the accept URL for any pending
+invitation.
+
+GitHub invitations **expire after 7 days**. Expired invitations are
+marked `EXPIRED` and no URL is offered, because the link no longer
+works: the student has to be invited again.
 
 ## Example: Two Concurrent Classes
 
@@ -752,12 +887,12 @@ These commands operate on CS472:
 These explicitly operate on CS281:
 
 ``` bash
-./mgc -cr cs281 student list
-./mgc -cr cs281 student find "Smith"
+./mgc -c cs281 student list
+./mgc -c cs281 student find "Smith"
 ```
 
 Before provisioning a student, the output identifies the active
-classroom and organization so the target is visible before `-apply` is
+classroom and organization so the target is visible before `--apply` is
 used.
 
 ## Design Principles
@@ -782,7 +917,7 @@ and metadata are repaired.
 **Prefer explicit operations.** Missing prerequisites produce errors
 rather than silently creating unrelated resources.
 
-**Dry-run first.** Changes require an explicit `-apply`/`--apply`.
+**Dry-run first.** Changes require an explicit `--apply`/`-a`.
 
 **Keep credentials out of the utility.** Authentication is delegated to
 the official GitHub CLI.
@@ -793,14 +928,14 @@ the official GitHub CLI.
 .
 ├── cmd/                 Cobra commands (one file per command group)
 │   ├── classroom.go
-│   ├── import.go        classroom import (Canvas)
+│   ├── import.go        classroom import (CSV roster)
 │   ├── doctor.go
 │   ├── properties.go
 │   ├── root.go
 │   ├── student.go
 │   └── team.go
 ├── internal/
-│   ├── canvas/          Canvas export parsing
+│   ├── roster/          CSV roster parsing
 │   ├── config/          config loading, validation, and path resolution
 │   ├── course/          classroom operations (provisioning, search, teams)
 │   └── gh/              thin wrapper around the `gh` CLI
@@ -830,7 +965,7 @@ including that dry runs perform none.
 
 The core multi-classroom configuration, grader-team administration,
 custom-property setup, one-off student provisioning, student
-inspection/search, Canvas import, and CSV batch provisioning workflows
+inspection/search, roster import, and CSV batch provisioning workflows
 are implemented and covered by unit tests.
 
 ### Upgrading from earlier versions
@@ -838,7 +973,10 @@ are implemented and covered by unit tests.
 Earlier versions did not send the request body when setting custom
 properties, so student repositories created with them may have no
 `repo_type`, `student_name`, or `github_id` values. Those repositories
-will not appear in `student list` or `student find`. To fix them,
-re-run the original `student create` or `student create-batch` command:
-it detects the missing properties and sets them without touching
-repository contents. Review the dry run first.
+will not appear in `student list` or `student find`. To fix them, run
+the roster import with `--repair` (or `student create` for a single
+student): it detects the missing properties and sets them without
+touching repository contents. Review the dry run first.
+
+`student create-batch` has been removed; use `classroom import`, with
+`--name-column`/`--github-column` if your CSV headers differ.

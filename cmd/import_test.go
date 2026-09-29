@@ -32,6 +32,9 @@ func TestImportChecksColumnsBeforeContactingGitHub(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `missing required columns "GitHub-ID"`) {
 		t.Fatalf("err = %v", err)
 	}
+	if !strings.Contains(err.Error(), "--name-column/--github-column") || !strings.Contains(err.Error(), "see: mgc classroom import --help") {
+		t.Errorf("missing-column error should point to --help: %v", err)
+	}
 }
 
 func TestImportMissingFile(t *testing.T) {
@@ -49,8 +52,45 @@ func TestImportNegativeNumber(t *testing.T) {
 }
 
 func TestImportUsesActiveClassroom(t *testing.T) {
-	err := run(t, tempConfig(t), "-cr", "nope", "classroom", "import", "x.csv")
+	err := run(t, tempConfig(t), "-c", "nope", "classroom", "import", "x.csv")
 	if err == nil || !strings.Contains(err.Error(), "classroom 'nope' does not exist") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestImportHelpListsRequiredColumns(t *testing.T) {
+	c, _, err := rootCmd.Find([]string{"classroom", "import"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Name", "GitHub-ID", "other columns are ignored", "--name-column", "--github-column", "--repair", "repo_prefix"} {
+		if !strings.Contains(c.Long, want) {
+			t.Errorf("help text missing %q", want)
+		}
+	}
+}
+
+func TestImportColumnOverridesAreUsed(t *testing.T) {
+	dir := t.TempDir()
+	csv := filepath.Join(dir, "export.csv")
+	os.WriteFile(csv, []byte("Student,GitHub Username\nJane Smith,jsmith\n"), 0o600)
+	t.Setenv("PATH", "") // columns must be checked before any gh call
+
+	// Wrong override: the error names the column that was asked for.
+	err := run(t, tempConfig(t), "classroom", "import", csv, "--name-column", "Student", "--github-column", "Handle")
+	if err == nil || !strings.Contains(err.Error(), `"Handle"`) {
+		t.Fatalf("err = %v", err)
+	}
+	// Correct overrides get past the column check and on to GitHub.
+	err = run(t, tempConfig(t), "classroom", "import", csv, "--name-column", "Student", "--github-column", "GitHub Username")
+	if err == nil || strings.Contains(err.Error(), "missing required columns") || !strings.Contains(err.Error(), "gh") {
+		t.Fatalf("err = %v, want a gh error after the columns were accepted", err)
+	}
+}
+
+func TestCreateBatchRemoved(t *testing.T) {
+	c, _, _ := rootCmd.Find([]string{"student", "create-batch"})
+	if c != nil && c.Name() == "create-batch" {
+		t.Error("student create-batch should be removed")
 	}
 }

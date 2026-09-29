@@ -1,32 +1,30 @@
 package cmd
 
 import (
-	"reflect"
+	"strings"
 	"testing"
 )
 
-func TestNormalizeArgs(t *testing.T) {
+func TestRejectLegacyArgs(t *testing.T) {
 	cases := []struct {
-		in, want []string
+		args []string
+		want string // substring of the error; "" means no error
 	}{
-		{[]string{"-cr", "cs281", "student", "list"}, []string{"--classroom", "cs281", "student", "list"}},
-		{[]string{"-apply", "team", "create"}, []string{"--apply", "team", "create"}},
-		{[]string{"-a", "--classroom", "x"}, []string{"-a", "--classroom", "x"}},
-		{[]string{"student", "find", "--", "-cr"}, []string{"student", "find", "--", "-cr"}},
-		{nil, []string{}},
+		{[]string{"-apply", "team", "create"}, "use --apply or -a"},
+		{[]string{"-cr", "cs281", "student", "list"}, "use --classroom or -c"},
+		{[]string{"-cr=cs281", "student", "list"}, "use --classroom or -c"},
+		{[]string{"-a", "-c", "cs281", "team", "create"}, ""},
+		{[]string{"--apply", "--classroom", "cs281", "team", "create"}, ""},
+		{[]string{"student", "find", "--", "-cr"}, ""}, // after "--" is data
+		{nil, ""},
 	}
 	for _, c := range cases {
-		got := normalizeArgs(c.in)
-		if !reflect.DeepEqual(got, c.want) {
-			t.Errorf("normalizeArgs(%v) = %v, want %v", c.in, got, c.want)
+		err := rejectLegacyArgs(c.args)
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%v: unexpected error %v", c.args, err)
+		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%v: err = %v, want %q", c.args, err, c.want)
 		}
-	}
-}
-
-func TestNormalizeArgsDoesNotMutateInput(t *testing.T) {
-	in := []string{"-cr", "x"}
-	normalizeArgs(in)
-	if in[0] != "-cr" {
-		t.Error("input slice was modified")
 	}
 }

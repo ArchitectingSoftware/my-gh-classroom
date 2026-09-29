@@ -162,3 +162,5 @@ func teamRepoPath(repo string) string {
 func errWithArgs(detail string) error {
 	return &gh.Error{Args: []string{"api", "--method", "PUT", "x", "-f", "content=QUJDREVGRw=="}, Detail: detail}
 }
+
+var ghErr409 = gh.Error{Detail: "gh: Git Repository is empty. (HTTP 409)"}

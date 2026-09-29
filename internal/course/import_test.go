@@ -7,17 +7,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ArchitectingSoftware/my-gh-classroom/internal/canvas"
+	"github.com/ArchitectingSoftware/my-gh-classroom/internal/roster"
 )
 
 const fullSchema = `[{"property_name":"repo_type"},{"property_name":"student_name"},{"property_name":"github_id"}]`
 
 func importMeta() ImportMeta {
-	return ImportMeta{File: "Canvas-Export.csv", Classroom: "cs281", Started: time.Date(2026, 9, 28, 9, 0, 0, 0, time.UTC)}
+	return ImportMeta{File: "roster.csv", Classroom: "cs281", Started: time.Date(2026, 9, 28, 9, 0, 0, 0, time.UTC)}
 }
 
-func stu(row int, name, id string) canvas.Student {
-	return canvas.Student{Row: row, Name: name, GitHubID: canvas.NormalizeGitHubID(id), RawID: id}
+func stu(row int, name, id string) roster.Student {
+	return roster.Student{Row: row, Name: name, GitHubID: roster.NormalizeGitHubID(id), RawID: id}
 }
 
 // importFixture wires the preflight calls every import makes.
@@ -47,7 +47,7 @@ func TestImportDryRunMakesNoChanges(t *testing.T) {
 	importFixture(f, existingRepos).user("alice1")
 
 	var results bytes.Buffer
-	sum, err := s.ImportStudents([]canvas.Student{
+	sum, err := s.ImportStudents([]roster.Student{
 		stu(2, "Alice Anders", "alice1"),
 		stu(3, "Bob Baker", "bob2"),
 	}, importMeta(), &results)
@@ -80,7 +80,7 @@ func TestImportApplyCreatesOnlyMissing(t *testing.T) {
 	s, f, out := newService(t, true)
 	newRepoRoutes(importFixture(f, existingRepos).user("alice1"), "alice1")
 
-	sum, err := s.ImportStudents([]canvas.Student{
+	sum, err := s.ImportStudents([]roster.Student{
 		stu(2, "Alice Anders", "alice1"),
 		stu(3, "Bob Baker", "BOB2"),    // existing, custom repo name, different case
 		stu(4, "Carol Chen", "carol3"), // existing by repo name, no properties
@@ -101,7 +101,7 @@ func TestImportApplyCreatesOnlyMissing(t *testing.T) {
 	}
 	o := out.String()
 	for _, want := range []string{"CREATING", "SUCCESS  https://github.com/" + org + "/alice1", "Created:      1",
-		`missing custom properties; repair with: mgc -apply student create --name "Carol Chen" --github carol3 --repo carol3`} {
+		"missing custom properties; re-run with --repair to fix"} {
 		if !strings.Contains(o, want) {
 			t.Errorf("output missing %q:\n%s", want, o)
 		}
@@ -112,7 +112,7 @@ func TestImportIsIdempotent(t *testing.T) {
 	// Second run over the same roster: everyone now has a repository.
 	s, f, _ := newService(t, true)
 	importFixture(f, `[{"name":"alice1","html_url":"u/alice1","custom_properties":{"repo_type":"student","github_id":"alice1"}}]`)
-	sum, err := s.ImportStudents([]canvas.Student{stu(2, "Alice Anders", "alice1")}, importMeta(), nil)
+	sum, err := s.ImportStudents([]roster.Student{stu(2, "Alice Anders", "alice1")}, importMeta(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestImportPerStudentErrorsDoNotStopTheRun(t *testing.T) {
 		user("zed")
 	newRepoRoutes(f, "zed")
 
-	sum, err := s.ImportStudents([]canvas.Student{
+	sum, err := s.ImportStudents([]roster.Student{
 		stu(2, "Blank Id", ""),
 		stu(3, "Bad Id", "jane@drexel.edu"),
 		stu(4, "Ghost", "ghost"),
@@ -144,13 +144,13 @@ func TestImportPerStudentErrorsDoNotStopTheRun(t *testing.T) {
 	}
 	o := out.String()
 	for _, want := range []string{
-		"GitHub-ID is blank",
-		`GitHub-ID "jane@drexel.edu" is not a valid GitHub username`,
+		"GitHub ID is blank",
+		`GitHub ID "jane@drexel.edu" is not a valid GitHub username`,
 		"GitHub user 'ghost' does not exist",
 		"belongs to GitHub user 'someoneelse'",
-		"duplicate GitHub-ID, already handled at [5/6]",
+		"duplicate GitHub ID, already handled at [5/6]",
 		"Errors\n",
-		`[3/6] Ghost (GitHub-ID "ghost", CSV row 4)`,
+		`[3/6] Ghost (GitHub ID "ghost", CSV row 4)`,
 	} {
 		if !strings.Contains(o, want) {
 			t.Errorf("output missing %q:\n%s", want, o)
@@ -165,7 +165,7 @@ func TestImportPartialFailureIsReportedOnOneLine(t *testing.T) {
 		on("GET", repoPath("alice1", "contents/README.md"), `{"sha":"s"}`).
 		fail("PUT", repoPath("alice1", "contents/README.md"), errWithArgs("gh: Server Error (HTTP 500)"))
 
-	sum, err := s.ImportStudents([]canvas.Student{stu(2, "Alice Anders", "alice1")}, importMeta(), nil)
+	sum, err := s.ImportStudents([]roster.Student{stu(2, "Alice Anders", "alice1")}, importMeta(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestImportPartialFailureIsReportedOnOneLine(t *testing.T) {
 			line = l
 		}
 	}
-	if !strings.Contains(line, "ERROR") || !strings.Contains(line, "repair it with") || !strings.Contains(line, "HTTP 500") {
+	if !strings.Contains(line, "ERROR") || !strings.Contains(line, "re-run with --repair to finish it") || !strings.Contains(line, "HTTP 500") {
 		t.Errorf("partial failure line = %q", line)
 	}
 	if strings.Contains(o, "content=") {
@@ -190,7 +190,7 @@ func TestImportPartialFailureIsReportedOnOneLine(t *testing.T) {
 func TestImportPreflightMissingTeam(t *testing.T) {
 	s, f, _ := newService(t, true)
 	f.fail("GET", "orgs/"+org+"/teams/graders", errNotFound)
-	_, err := s.ImportStudents([]canvas.Student{stu(2, "A", "a")}, importMeta(), nil)
+	_, err := s.ImportStudents([]roster.Student{stu(2, "A", "a")}, importMeta(), nil)
 	if err == nil || !strings.Contains(err.Error(), "team 'graders' does not exist") {
 		t.Fatalf("err = %v", err)
 	}
@@ -200,7 +200,7 @@ func TestImportPreflightMissingSchema(t *testing.T) {
 	// Apply: stop before touching anything.
 	s, f, _ := newService(t, true)
 	f.team().on("GET", "orgs/"+org+"/properties/schema", `[{"property_name":"repo_type"}]`)
-	_, err := s.ImportStudents([]canvas.Student{stu(2, "A", "a")}, importMeta(), nil)
+	_, err := s.ImportStudents([]roster.Student{stu(2, "A", "a")}, importMeta(), nil)
 	if err == nil || !strings.Contains(err.Error(), "student_name, github_id") || !strings.Contains(err.Error(), "properties setup") {
 		t.Fatalf("err = %v", err)
 	}
@@ -208,7 +208,7 @@ func TestImportPreflightMissingSchema(t *testing.T) {
 	// Dry run: warn and keep going so the whole plan is visible.
 	s, f, out := newService(t, false)
 	f.team().on("GET", "orgs/"+org+"/properties/schema", `[]`).repos(`[]`).user("a")
-	if _, err := s.ImportStudents([]canvas.Student{stu(2, "A", "a")}, importMeta(), nil); err != nil {
+	if _, err := s.ImportStudents([]roster.Student{stu(2, "A", "a")}, importMeta(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "WARNING   custom properties not defined") || !strings.Contains(out.String(), "WOULD CREATE") {
@@ -219,10 +219,10 @@ func TestImportPreflightMissingSchema(t *testing.T) {
 func TestImportReportsNormalizedID(t *testing.T) {
 	s, f, out := newService(t, false)
 	importFixture(f, `[]`).user("jsmith")
-	if _, err := s.ImportStudents([]canvas.Student{stu(2, "Jane", "https://github.com/jsmith")}, importMeta(), nil); err != nil {
+	if _, err := s.ImportStudents([]roster.Student{stu(2, "Jane", "https://github.com/jsmith")}, importMeta(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), `(GitHub-ID entered as "https://github.com/jsmith")`) {
+	if !strings.Contains(out.String(), `(GitHub ID entered as "https://github.com/jsmith")`) {
 		t.Errorf("output:\n%s", out)
 	}
 }

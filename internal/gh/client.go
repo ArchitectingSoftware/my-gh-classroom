@@ -27,12 +27,16 @@ func (e *Error) Error() string {
 }
 
 // IsNotFound reports whether err is a gh API failure caused by an HTTP 404.
-func IsNotFound(err error) bool {
+func IsNotFound(err error) bool { return IsStatus(err, 404) }
+
+// IsStatus reports whether err is a gh API failure with the given HTTP
+// status, as reported by gh (e.g. "gh: Not Found (HTTP 404)").
+func IsStatus(err error, code int) bool {
 	var ge *Error
 	if !errors.As(err, &ge) {
 		return false
 	}
-	return strings.Contains(ge.Detail, "HTTP 404") || strings.Contains(ge.Detail, "Not Found (HTTP 404)")
+	return strings.Contains(ge.Detail, fmt.Sprintf("(HTTP %d)", code))
 }
 
 type Client struct{}

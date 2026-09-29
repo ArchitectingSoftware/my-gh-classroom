@@ -25,8 +25,15 @@ type Classroom struct {
 	CourseInfoRepo    string `json:"course_info_repo"`
 	CourseInfoURL     string `json:"course_info_url"`
 	// CourseName is the human-readable course label used in generated
-	// repository descriptions and READMEs. Optional; defaults to the alias.
-	CourseName string `json:"course_name,omitempty"`
+	// repository descriptions and READMEs. Optional; defaults to the
+	// upper-cased alias. Always written (even when empty) so the setting
+	// is visible in config.json.
+	CourseName string `json:"course_name"`
+	// RepoPrefix is prepended to the student's GitHub ID to form their
+	// repository name, e.g. "cs472-" gives "cs472-jsmith42". Optional;
+	// defaults to "" (the repository is named after the GitHub ID).
+	// Always written (even when empty) so the setting is visible.
+	RepoPrefix string `json:"repo_prefix"`
 }
 
 type Config struct {
@@ -36,6 +43,7 @@ type Config struct {
 
 var repoNameRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 var classroomAliasRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+var repoPrefixRE = regexp.MustCompile(`^[A-Za-z0-9._-]{0,60}$`)
 
 // ResolvePath determines which config file to use. Precedence:
 //  1. explicit path (the --config flag)
@@ -106,7 +114,7 @@ func (c Config) Classroom(alias string) (Classroom, error) {
 		alias = c.DefaultClassroom
 	}
 	if alias == "" {
-		return Classroom{}, fmt.Errorf("no classroom selected and no default classroom is configured; use --classroom/-cr or set a default")
+		return Classroom{}, fmt.Errorf("no classroom selected and no default classroom is configured; use --classroom/-c or set a default")
 	}
 	cl, ok := c.Classrooms[alias]
 	if !ok {
@@ -173,6 +181,9 @@ func ValidateClassroom(alias string, c Classroom) error {
 	}
 	if !repoNameRE.MatchString(c.CourseInfoRepo) {
 		return fmt.Errorf("classroom '%s' has invalid course_info_repo '%s'", alias, c.CourseInfoRepo)
+	}
+	if !repoPrefixRE.MatchString(c.RepoPrefix) {
+		return fmt.Errorf("classroom '%s' has invalid repo_prefix '%s'; use up to 60 letters, digits, '.', '_', or '-'", alias, c.RepoPrefix)
 	}
 	valid := map[string]bool{"pull": true, "triage": true, "push": true, "maintain": true, "admin": true}
 	if !valid[c.GraderPermission] || !valid[c.StudentPermission] {

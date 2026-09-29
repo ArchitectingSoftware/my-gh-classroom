@@ -35,6 +35,9 @@ func TestValidateClassroom(t *testing.T) {
 		{"bad repo", "cs281", func(c *Classroom) { c.CourseInfoRepo = "course info" }, "invalid course_info_repo"},
 		{"bad permission", "cs281", func(c *Classroom) { c.StudentPermission = "write" }, "permissions must be"},
 		{"http url", "cs281", func(c *Classroom) { c.CourseInfoURL = "http://github.com/x" }, "invalid course_info_url"},
+		{"repo prefix", "cs281", func(c *Classroom) { c.RepoPrefix = "cs281-fa26_" }, ""},
+		{"repo prefix with space", "cs281", func(c *Classroom) { c.RepoPrefix = "cs 281-" }, "invalid repo_prefix"},
+		{"repo prefix with slash", "cs281", func(c *Classroom) { c.RepoPrefix = "cs281/" }, "invalid repo_prefix"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -65,6 +68,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "nested", "config.json")
 	cl := validClassroom()
 	cl.CourseName = "CS 281"
+	cl.RepoPrefix = "cs281-"
 	in := Config{DefaultClassroom: "cs281", Classrooms: map[string]Classroom{"cs281": cl}}
 	if err := Save(p, in); err != nil {
 		t.Fatal(err)
@@ -78,14 +82,32 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSaveOmitsEmptyCourseName(t *testing.T) {
+func TestSaveAlwaysWritesOptionalFields(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.json")
 	if err := Save(p, Config{Classrooms: map[string]Classroom{"cs281": validClassroom()}}); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(p)
-	if strings.Contains(string(data), "course_name") {
-		t.Errorf("empty course_name should be omitted:\n%s", data)
+	for _, k := range []string{`"course_name": ""`, `"repo_prefix": ""`} {
+		if !strings.Contains(string(data), k) {
+			t.Errorf("config should always contain %s so the setting is discoverable:\n%s", k, data)
+		}
+	}
+}
+
+func TestBlankOptionalFieldsSurviveRoundTrip(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(p, []byte(`{"classrooms":{"cs281":{"organization":"o","grader_team":"g","course_info_repo":"r","course_info_url":"https://x/y","course_name":"","repo_prefix":""}}}`), 0o600)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(p, c); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(p)
+	if !strings.Contains(string(data), `"repo_prefix": ""`) {
+		t.Errorf("blank repo_prefix was dropped on save:\n%s", data)
 	}
 }
 

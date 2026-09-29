@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/ArchitectingSoftware/my-gh-classroom/internal/config"
 	"github.com/ArchitectingSoftware/my-gh-classroom/internal/gh"
@@ -48,11 +49,15 @@ func classroomCmd() *cobra.Command {
 			StudentPermission: "push",
 			CourseInfoRepo:    "YOUR_COURSE_INFO_REPO",
 			CourseInfoURL:     "https://github.com/YOUR_GITHUB_ORGANIZATION/YOUR_COURSE_INFO_REPO",
+			CourseName:        strings.ToUpper(alias),
+			RepoPrefix:        "",
 		}
 		if !apply {
 			fmt.Printf("DRY RUN   would add classroom '%s' to %s\n", alias, configPath)
 			fmt.Printf("          organization: %s\n", cl.Organization)
 			fmt.Printf("          course-info: %s\n", cl.CourseInfoRepo)
+			fmt.Printf("          course name: %s\n", cl.CourseName)
+			fmt.Printf("          repo prefix: %q\n", cl.RepoPrefix)
 			return nil
 		}
 		cfg.Classrooms[alias] = cl

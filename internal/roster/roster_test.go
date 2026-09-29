@@ -1,4 +1,4 @@
-package canvas
+package roster
 
 import (
 	"errors"
@@ -17,7 +17,7 @@ func row(name, id string) string {
 
 func TestReadCanvasExport(t *testing.T) {
 	in := header + row("Jane Smith", "jsmith42") + row(" Mary  Ann   Lee ", " @mlee ") + row("Bob Jones", "https://github.com/bjones/")
-	got, err := Read(strings.NewReader(in), 0)
+	got, err := Read(strings.NewReader(in), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestReadCanvasExport(t *testing.T) {
 func TestReadLimit(t *testing.T) {
 	in := header + row("A A", "a") + row("B B", "b") + row("C C", "c")
 	for limit, want := range map[int]int{0: 3, 1: 1, 2: 2, 3: 3, 10: 3} {
-		got, err := Read(strings.NewReader(in), limit)
+		got, err := Read(strings.NewReader(in), Options{Limit: limit})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -50,14 +50,14 @@ func TestReadLimit(t *testing.T) {
 			t.Errorf("limit %d: got %d records, want %d", limit, len(got), want)
 		}
 	}
-	if _, err := Read(strings.NewReader(in), -1); err == nil {
+	if _, err := Read(strings.NewReader(in), Options{Limit: -1}); err == nil {
 		t.Error("negative limit should error")
 	}
 }
 
 func TestReadBOMAndCRLFAndNoTrailingNewline(t *testing.T) {
 	in := "\ufeff" + strings.ReplaceAll(header+row("A A", "a"), "\n", "\r\n") + strings.TrimSuffix(row("B B", "b"), "\n")
-	got, err := Read(strings.NewReader(in), 0)
+	got, err := Read(strings.NewReader(in), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestReadBOMAndCRLFAndNoTrailingNewline(t *testing.T) {
 
 func TestReadQuotedNameWithComma(t *testing.T) {
 	in := header + `"Smith, Jane",1,1,S,t,1,1,1,x,jsmith` + "\n"
-	got, err := Read(strings.NewReader(in), 0)
+	got, err := Read(strings.NewReader(in), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestReadQuotedNameWithComma(t *testing.T) {
 
 func TestReadShortRowAndBlankID(t *testing.T) {
 	in := header + "Only Name\n" + row("No Id", "")
-	got, err := Read(strings.NewReader(in), 0)
+	got, err := Read(strings.NewReader(in), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,32 +96,32 @@ func TestReadMissingColumns(t *testing.T) {
 		"wrong case": "name,github-id\nJane,j\n",
 	}
 	for label, in := range cases {
-		_, err := Read(strings.NewReader(in), 0)
+		_, err := Read(strings.NewReader(in), Options{})
 		if !errors.Is(err, ErrMissingColumns) {
 			t.Errorf("%s: err = %v, want ErrMissingColumns", label, err)
 		}
 	}
-	_, err := Read(strings.NewReader("Name,ID\n"), 0)
+	_, err := Read(strings.NewReader("Name,ID\n"), Options{})
 	if err == nil || !strings.Contains(err.Error(), `"GitHub-ID"`) || !strings.Contains(err.Error(), "found: Name, ID") {
 		t.Errorf("error should name missing and found columns: %v", err)
 	}
 }
 
 func TestReadEmptyFile(t *testing.T) {
-	if _, err := Read(strings.NewReader(""), 0); err == nil {
+	if _, err := Read(strings.NewReader(""), Options{}); err == nil {
 		t.Error("expected error for empty file")
 	}
 }
 
 func TestReadHeaderOnly(t *testing.T) {
-	got, err := Read(strings.NewReader(header), 0)
+	got, err := Read(strings.NewReader(header), Options{})
 	if err != nil || len(got) != 0 {
 		t.Errorf("got %v, %v", got, err)
 	}
 }
 
 func TestReadFileMissing(t *testing.T) {
-	if _, err := ReadFile(filepath.Join(t.TempDir(), "nope.csv"), 0); err == nil {
+	if _, err := ReadFile(filepath.Join(t.TempDir(), "nope.csv"), Options{}); err == nil {
 		t.Error("expected error")
 	}
 }
@@ -129,7 +129,7 @@ func TestReadFileMissing(t *testing.T) {
 func TestReadFile(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "x.csv")
 	os.WriteFile(p, []byte(header+row("A A", "a")), 0o600)
-	got, err := ReadFile(p, 0)
+	got, err := ReadFile(p, Options{})
 	if err != nil || len(got) != 1 {
 		t.Errorf("got %v, %v", got, err)
 	}
@@ -163,5 +163,29 @@ func TestValidGitHubID(t *testing.T) {
 		if ValidGitHubID(bad) {
 			t.Errorf("%q should be invalid", bad)
 		}
+	}
+}
+
+func TestReadCustomColumns(t *testing.T) {
+	in := "Student,GitHub Username,Section\nJane Smith,jsmith42,001\n"
+	got, err := Read(strings.NewReader(in), Options{NameColumn: "Student", GitHubColumn: " GitHub Username "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "Jane Smith" || got[0].GitHubID != "jsmith42" {
+		t.Errorf("got %+v", got)
+	}
+	// Defaults no longer apply once overridden.
+	_, err = Read(strings.NewReader(in), Options{})
+	if !errors.Is(err, ErrMissingColumns) {
+		t.Errorf("default columns should be missing: %v", err)
+	}
+	_, err = Read(strings.NewReader(in), Options{NameColumn: "Student", GitHubColumn: "Handle"})
+	if err == nil || !strings.Contains(err.Error(), `"Handle"`) {
+		t.Errorf("error should name the custom column: %v", err)
+	}
+	_, err = Read(strings.NewReader(in), Options{NameColumn: "Student", GitHubColumn: "Student"})
+	if err == nil || !strings.Contains(err.Error(), "must differ") {
+		t.Errorf("same column for both should fail: %v", err)
 	}
 }

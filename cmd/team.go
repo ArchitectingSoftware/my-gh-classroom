@@ -35,15 +35,7 @@ func teamCmd() *cobra.Command {
 		if len(a) > 0 {
 			name = a[0]
 		}
-		m, e := svc.TeamMembers(name)
-		if e != nil {
-			return e
-		}
-		fmt.Printf("Members of %s/%s (%d):\n", activeConfig.Organization, name, len(m))
-		for _, x := range m {
-			fmt.Println(" ", x["login"])
-		}
-		return nil
+		return svc.TeamList(name)
 	}}
 	add := &cobra.Command{Use: "add [name] USERNAME", Args: cobra.RangeArgs(1, 2), RunE: func(_ *cobra.Command, a []string) error {
 		name := activeConfig.GraderTeam
@@ -63,6 +55,38 @@ func teamCmd() *cobra.Command {
 		}
 		return svc.RemoveTeamMember(name, user)
 	}}
-	cmd.AddCommand(create, info, list, add, rem)
+	var inviteTeam string
+	invites := &cobra.Command{
+		Use:   "invites [USERNAME]",
+		Short: "Show pending team invitations and the URL to accept them",
+		Long: `Show people who were added to the grader team but have not yet accepted
+GitHub's organization invitation, and where to accept it, for when a TA
+or grader has lost the email (GitHub does not re-send it).
+
+With no argument, every pending invitation to the team is listed. With a
+GitHub username (or invited email), just that person is shown.
+
+Invitations are accepted at https://github.com/orgs/<org>/invitation
+while signed in to the invited GitHub account. They expire after 7 days;
+expired ones are marked and the person must be added again.`,
+		Example: `  mgc team invites              # everyone who has not accepted yet
+  mgc team invites ta-alice     # one person
+  mgc team invites --team staff # a team other than grader_team`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, a []string) error {
+			name := activeConfig.GraderTeam
+			if inviteTeam != "" {
+				name = inviteTeam
+			}
+			who := ""
+			if len(a) == 1 {
+				who = a[0]
+			}
+			return svc.TeamInvitesReport(name, who)
+		},
+	}
+	invites.Flags().StringVar(&inviteTeam, "team", "", "Team to report on (default: the classroom's grader_team)")
+	rem.Short = "Remove a member from a team, or cancel their pending invitation"
+	cmd.AddCommand(create, info, list, add, rem, invites)
 	return cmd
 }
