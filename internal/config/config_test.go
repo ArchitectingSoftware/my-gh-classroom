@@ -180,3 +180,20 @@ func TestResolvePath(t *testing.T) {
 		t.Errorf("env: %q", got)
 	}
 }
+
+func TestNormalizeRepoPrefix(t *testing.T) {
+	cases := map[string]string{
+		"":        "",
+		"cs472":   "cs472-",
+		"cs472-":  "cs472-",
+		"cs472_":  "cs472_",
+		"cs472.":  "cs472.",
+		" cs472 ": "cs472-",
+		"cs-472":  "cs-472-",
+	}
+	for in, want := range cases {
+		if got := NormalizeRepoPrefix(in); got != want {
+			t.Errorf("NormalizeRepoPrefix(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

@@ -30,7 +30,8 @@ type Classroom struct {
 	// is visible in config.json.
 	CourseName string `json:"course_name"`
 	// RepoPrefix is prepended to the student's GitHub ID to form their
-	// repository name, e.g. "cs472-" gives "cs472-jsmith42". Optional;
+	// repository name, e.g. "cs472" gives "cs472-jsmith42" (a dash is added
+	// unless the prefix already ends in '-', '_' or '.'). Optional;
 	// defaults to "" (the repository is named after the GitHub ID).
 	// Always written (even when empty) so the setting is visible.
 	RepoPrefix string `json:"repo_prefix"`
@@ -174,6 +175,17 @@ func applyDefaults(c Classroom) Classroom {
 		c.CourseInfoRepo = DefaultCourseInfoRepo
 	}
 	return c
+}
+
+// NormalizeRepoPrefix returns the prefix actually used in repository
+// names: a "-" separator is added unless the prefix is empty or already
+// ends in '-', '_' or '.'. So "cs472" and "cs472-" both give "cs472-".
+func NormalizeRepoPrefix(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" || strings.ContainsAny(p[len(p)-1:], "-_.") {
+		return p
+	}
+	return p + "-"
 }
 
 func ValidateClassroom(alias string, c Classroom) error {

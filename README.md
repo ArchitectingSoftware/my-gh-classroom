@@ -249,7 +249,7 @@ A configuration can therefore look like:
       "course_info_repo": "course-info",
       "course_info_url": "https://github.com/CS281-Arch-FA26/course-info",
       "course_name": "CS281",
-      "repo_prefix": "cs281-",
+      "repo_prefix": "cs281",
       "instructors": ["Prof. Mitchell", "Prof. Jones"]
     }
   }
@@ -267,7 +267,7 @@ A configuration can therefore look like:
 | `course_info_repo`   | Shared course-information repository.                          |
 | `course_info_url`    | URL inserted into each student’s initial README.               |
 | `course_name`        | Optional course label for repo descriptions and READMEs. Defaults to the upper-cased alias. |
-| `repo_prefix`        | Optional prefix for student repository names: `cs281-` gives `cs281-jsmith42`. Defaults to none. |
+| `repo_prefix`        | Optional prefix for student repository names: `cs281` gives `cs281-jsmith42` (a `-` is added unless the prefix already ends in `-`, `_`, or `.`). Defaults to none. |
 | `instructors`        | Optional list of names that sign `--message` notes, e.g. `["Dr. Brian Mitchell"]`. Defaults to “The <course_name> teaching team”. |
 
 `default_classroom` contains the classroom alias used when
@@ -643,7 +643,8 @@ preceded by the classroom’s `repo_prefix` if one is configured:
 
 ``` text
 jsmith42            (no repo_prefix)
-cs281-jsmith42      (repo_prefix "cs281-")
+cs281-jsmith42      (repo_prefix "cs281" or "cs281-")
+cs281_jsmith42      (repo_prefix "cs281_")
 ```
 
 `--repo NAME` overrides the name for one student.
@@ -777,8 +778,10 @@ Bob Baker,bbaker
 The file is checked for both columns before anything is sent to
 GitHub. `./mgc classroom import --help` lists the required columns.
 
-Each new repository is named `<repo_prefix><GitHub ID>` using the
-classroom’s `repo_prefix` (see [Classroom Settings](#classroom-settings)).
+Each new repository is named `<repo_prefix>-<GitHub ID>` using the
+classroom’s `repo_prefix` (see [Classroom Settings](#classroom-settings)),
+or just the GitHub ID when no prefix is set. The report header shows the
+resolved pattern, e.g. `Repo names: cs472-<github-id>`.
 Running `classroom import` with no file prints a warning and usage.
 
 `-n`/`--number N` processes only the first N students, which is handy

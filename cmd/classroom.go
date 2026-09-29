@@ -58,7 +58,7 @@ func classroomCmd() *cobra.Command {
 			fmt.Printf("          organization: %s\n", cl.Organization)
 			fmt.Printf("          course-info: %s\n", cl.CourseInfoRepo)
 			fmt.Printf("          course name: %s\n", cl.CourseName)
-			fmt.Printf("          repo prefix: %q\n", cl.RepoPrefix)
+			fmt.Printf("          repo prefix: %q (e.g. \"cs472\" names repos cs472-<github-id>)\n", cl.RepoPrefix)
 			fmt.Printf("          instructors: [] (sign --message output; edit to add names)\n")
 			return nil
 		}

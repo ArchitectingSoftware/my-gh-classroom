@@ -485,7 +485,10 @@ func (s *Service) CreateStudentRepo(name, github, repoName string) (string, erro
 
 // RepoName is the default repository name for a student: the classroom's
 // repo_prefix followed by their GitHub login.
-func (s *Service) RepoName(login string) string { return s.C.RepoPrefix + login }
+func (s *Service) RepoName(login string) string { return s.repoPrefix() + login }
+
+// repoPrefix is the configured repo_prefix with its separator, e.g. "cs472-".
+func (s *Service) repoPrefix() string { return config.NormalizeRepoPrefix(s.C.RepoPrefix) }
 
 // ValidateRepoName checks a repository name against GitHub's rules.
 func ValidateRepoName(name string) error {
@@ -757,7 +760,7 @@ func (s *Service) StudentInfo(query string) error {
 	if err != nil {
 		return err
 	}
-	repo, found := findStudentRepo(repos, query, s.C.RepoPrefix)
+	repo, found := findStudentRepo(repos, query, s.repoPrefix())
 
 	login := query
 	if found {
@@ -907,6 +910,6 @@ func (s *Service) Doctor(active string) error {
 		s.printf("Grader team:     NOT CREATED (%s)\n", s.C.GraderTeam)
 	}
 	s.printf("Course info URL: %s\n", s.C.CourseInfoURL)
-	s.printf("Repo names:      %s<github-id>\n", s.C.RepoPrefix)
+	s.printf("Repo names:      %s<github-id>\n", s.repoPrefix())
 	return nil
 }

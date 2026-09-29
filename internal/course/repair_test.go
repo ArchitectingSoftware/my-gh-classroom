@@ -268,3 +268,28 @@ func TestImportRepairRefusesOtherStudentsRepo(t *testing.T) {
 		t.Errorf("sum %+v\n%s", sum, out)
 	}
 }
+
+func TestRepoPrefixWithoutDashGetsOne(t *testing.T) {
+	s, f, out := prefixed(t, false)
+	s.C.RepoPrefix = "cs281" // no trailing dash
+	f.team().user("jsmith42").fail("GET", repoPath("cs281-jsmith42", ""), errNotFound)
+	if _, err := s.CreateStudentRepo("Jane", "jsmith42", ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "would create private repo "+org+"/cs281-jsmith42") {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestImportFindsRepoWithUndashedPrefix(t *testing.T) {
+	s, f, out := prefixed(t, false)
+	s.C.RepoPrefix = "cs281"
+	importFixture(f, `[{"name":"cs281-alice1","html_url":"u/cs281-alice1"}]`)
+	sum, err := s.ImportStudents([]roster.Student{stu(2, "Alice", "alice1")}, importMeta(), nil)
+	if err != nil || sum.Skipped != 1 || len(f.mutations()) != 0 {
+		t.Fatalf("sum %+v err %v\n%s", sum, err, out)
+	}
+	if !strings.Contains(out.String(), "Repo names:   cs281-<github-id>") {
+		t.Errorf("header should show the resolved prefix:\n%s", out)
+	}
+}

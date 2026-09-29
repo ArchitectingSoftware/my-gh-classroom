@@ -85,7 +85,7 @@ func (s *Service) ImportStudents(students []roster.Student, meta ImportMeta, res
 		p("  Columns:      name %q, GitHub ID %q\n", meta.NameColumn, meta.GitHubColumn)
 	}
 	p("  Classroom:    %s (%s)\n", meta.Classroom, s.C.Organization)
-	p("  Repo names:   %s<github-id>\n", s.C.RepoPrefix)
+	p("  Repo names:   %s<github-id>\n", s.repoPrefix())
 	p("  Existing:     %s\n", existing)
 	p("  Mode:         %s\n", mode)
 	p("  Records:      %s\n", records)
@@ -213,7 +213,7 @@ func (s *Service) importOne(st roster.Student, pos, slug string, repair bool, id
 	}
 	seen[key] = pos
 
-	if r, ok := idx.forStudent(id, s.C.RepoPrefix); ok {
+	if r, ok := idx.forStudent(id, s.repoPrefix()); ok {
 		if msg := conflict(r, id); msg != "" {
 			return fail(statusChecking, msg)
 		}

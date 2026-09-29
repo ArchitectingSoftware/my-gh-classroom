@@ -174,7 +174,7 @@ func (s *Service) Invites(query string) ([]Message, error) {
 
 // studentInvite reports the invitation state for one student.
 func (s *Service) studentInvite(repos []map[string]any, query string) ([]Message, error) {
-	r, ok := findStudentRepo(repos, query, s.C.RepoPrefix)
+	r, ok := findStudentRepo(repos, query, s.repoPrefix())
 	if !ok {
 		return nil, fmt.Errorf("no repository found for '%s' in %s", query, s.C.Organization)
 	}
