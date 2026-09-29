@@ -36,17 +36,25 @@ Students accept at https://github.com/<org>/<repo>/invitations while
 signed in to the invited GitHub account. Invitations expire after 7
 days; expired ones are marked EXPIRED and the student must be invited
 again.`,
-		Example: `  mgc student invites            # everyone with a pending invitation
-  mgc student invites jsmith42   # one student`,
+		Example: `  mgc student invites                     # everyone with a pending invitation
+  mgc student invites jsmith42            # one student
+  mgc student invites --message           # plus a ready-to-paste note for each`,
 		Args: cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, a []string) error {
+		RunE: func(c *cobra.Command, a []string) error {
 			q := ""
 			if len(a) == 1 {
 				q = a[0]
 			}
-			return svc.Invites(q)
+			msgs, err := svc.Invites(q)
+			if want, _ := c.Flags().GetBool("message"); want {
+				if e := emitMessages(msgs, "no pending invitations that can still be accepted"); e != nil && err == nil {
+					err = e
+				}
+			}
+			return err
 		},
 	}
+	invites.Flags().Bool("message", false, "Also write a ready-to-paste message for each student (saved to "+messagesFile+")")
 	cmd.AddCommand(create, list, info, find, invites)
 	return cmd
 }

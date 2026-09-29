@@ -94,3 +94,24 @@ func TestCreateBatchRemoved(t *testing.T) {
 		t.Error("student create-batch should be removed")
 	}
 }
+
+func TestMessageFlagsExist(t *testing.T) {
+	for _, path := range [][]string{{"classroom", "import"}, {"student", "invites"}, {"team", "invites"}} {
+		c, _, err := rootCmd.Find(path)
+		if err != nil || c.Flags().Lookup("message") == nil {
+			t.Errorf("%v should have --message (err %v)", path, err)
+		}
+	}
+}
+
+func TestEmitMessagesOverwritesStaleFile(t *testing.T) {
+	messagesFile = filepath.Join(t.TempDir(), "messages.txt")
+	os.WriteFile(messagesFile, []byte("OLD MESSAGE FROM LAST WEEK"), 0o600)
+	if err := emitMessages(nil, "nothing to do"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(messagesFile)
+	if strings.Contains(string(data), "OLD MESSAGE") || !strings.Contains(string(data), "nothing to do") {
+		t.Errorf("stale messages file not overwritten: %q", data)
+	}
+}

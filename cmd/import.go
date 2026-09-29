@@ -21,6 +21,7 @@ func importCmd() *cobra.Command {
 		nameColumn   string
 		githubColumn string
 		repair       bool
+		message      bool
 	)
 	c := &cobra.Command{
 		Use:   "import ROSTER_CSV",
@@ -58,6 +59,7 @@ A report is printed as students are processed and also written to
   mgc --apply classroom import roster.csv           # create repositories
   mgc --apply classroom import roster.csv --repair  # create, and fix incomplete repos
   mgc classroom import export.csv --name-column Student --github-column "GitHub Username"
+  mgc classroom import roster.csv --message         # plus notes for students to fix their username
   mgc -c cs281 --apply classroom import roster.csv  # a non-default classroom`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			switch len(args) {
@@ -108,6 +110,11 @@ A report is printed as students are processed and also written to
 			if err != nil {
 				return err
 			}
+			if message {
+				if err := emitMessages(sum.Messages, "no students need to fix their GitHub username"); err != nil {
+					return err
+				}
+			}
 			if sum.Errors > 0 {
 				return fmt.Errorf("%d of %d students had errors; see %s", sum.Errors, sum.Processed, resultsFile)
 			}
@@ -118,5 +125,6 @@ A report is printed as students are processed and also written to
 	c.Flags().StringVar(&nameColumn, "name-column", roster.NameColumn, "CSV column containing student names")
 	c.Flags().StringVar(&githubColumn, "github-column", roster.GitHubColumn, "CSV column containing GitHub usernames")
 	c.Flags().BoolVar(&repair, "repair", false, "Check existing repositories and fix anything missing instead of skipping them")
+	c.Flags().BoolVar(&message, "message", false, "Also write a ready-to-paste note for each student whose GitHub username is blank, invalid, or not found (saved to "+messagesFile+")")
 	return c
 }

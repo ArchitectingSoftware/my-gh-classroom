@@ -30,6 +30,9 @@ type ImportSummary struct {
 	Repaired  int
 	Skipped   int
 	Errors    int
+	// Messages asks students to fix problems only they can fix (a blank,
+	// malformed, or nonexistent GitHub username).
+	Messages []Message
 }
 
 // Per-student statuses shown in the report.
@@ -48,6 +51,7 @@ type importOutcome struct {
 	status  string
 	ok      bool
 	detail  string
+	problem string // student-fixable problem, for --message
 }
 
 // ImportStudents provisions a repository for each student that does not
@@ -131,6 +135,9 @@ func (s *Service) ImportStudents(students []roster.Student, meta ImportMeta, res
 		if !o.ok {
 			sum.Errors++
 			failures = append(failures, o)
+			if m, ok := s.rosterProblemMessage(st, o.problem); ok {
+				sum.Messages = append(sum.Messages, m)
+			}
 			p("ERROR    %s\n", o.detail)
 			continue
 		}
@@ -188,12 +195,16 @@ func (s *Service) importOne(st roster.Student, pos, slug string, repair bool, id
 		return o
 	}
 
+	problem := func(kind string, out importOutcome) importOutcome {
+		out.problem = kind
+		return out
+	}
 	id := st.GitHubID
 	switch {
 	case id == "":
-		return fail(statusChecking, "GitHub ID is blank")
+		return problem(problemBlank, fail(statusChecking, "GitHub ID is blank"))
 	case !roster.ValidGitHubID(id):
-		return fail(statusChecking, fmt.Sprintf("GitHub ID %q is not a valid GitHub username", st.RawID))
+		return problem(problemInvalid, fail(statusChecking, fmt.Sprintf("GitHub ID %q is not a valid GitHub username", st.RawID)))
 	}
 	key := strings.ToLower(id)
 	if first, dup := seen[key]; dup {
@@ -218,6 +229,10 @@ func (s *Service) importOne(st roster.Student, pos, slug string, repair bool, id
 	}
 
 	u, err := s.UserGet(id)
+	var nf *UserNotFoundError
+	if errors.As(err, &nf) {
+		return problem(problemNotFound, fail(statusChecking, concise(err)))
+	}
 	if err != nil {
 		return fail(statusChecking, concise(err))
 	}

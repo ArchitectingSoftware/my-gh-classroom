@@ -167,7 +167,7 @@ func TestTeamInvitesShowsReinviteCommand(t *testing.T) {
 	pinNow(t)
 	s, f, out := newService(t, false)
 	teamRoutes(f, `[]`, teamInvitesJSON)
-	if err := s.TeamInvitesReport("graders", "ta-cy"); err != nil {
+	if _, err := s.TeamInvitesReport("graders", "ta-cy"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "Re-invite:    mgc --apply team add ta-cy") {

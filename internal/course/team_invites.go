@@ -112,11 +112,12 @@ func (s *Service) TeamList(team string) error {
 }
 
 // TeamInvitesReport prints pending invitations to a team, or the status of
-// one person when who is non-empty.
-func (s *Service) TeamInvitesReport(team, who string) error {
+// one person when who is non-empty. It returns a ready-to-paste message for
+// each invitation that can still be accepted.
+func (s *Service) TeamInvitesReport(team, who string) ([]Message, error) {
 	invs, err := s.TeamInvites(team)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if who = strings.TrimSpace(who); who != "" {
 		return s.teamInviteOne(team, who, invs)
@@ -135,7 +136,7 @@ func (s *Service) TeamInvitesReport(team, who string) error {
 	s.printf("):\n")
 	if len(invs) == 0 {
 		s.println("  none: everyone added to the team has accepted")
-		return nil
+		return nil, nil
 	}
 	s.println()
 	s.printf("  %-30s %-18s %s\n", "GITHUB ID / EMAIL", "STATUS", "ACCEPT AT")
@@ -152,10 +153,16 @@ func (s *Service) TeamInvitesReport(team, who string) error {
 		s.println("EXPIRED or FAILED invitations no longer work. Re-invite with:")
 		s.println("  mgc --apply team add USERNAME")
 	}
-	return nil
+	var msgs []Message
+	for _, i := range invs {
+		if i.usable() {
+			msgs = append(msgs, s.teamInviteMessage(i))
+		}
+	}
+	return msgs, nil
 }
 
-func (s *Service) teamInviteOne(team, who string, invs []Invite) error {
+func (s *Service) teamInviteOne(team, who string, invs []Invite) ([]Message, error) {
 	if i, ok := findInvite(invs, who); ok {
 		s.printf("Team:         %s/%s\nInvitee:      %s\nInvitation:   %s\n", s.C.Organization, team, i.Name, inviteStatus(i))
 		if i.Failed != "" && i.Failed != "failed" {
@@ -170,21 +177,21 @@ func (s *Service) teamInviteOne(team, who string, invs []Invite) error {
 			if i.Login != "" {
 				s.printf("Re-invite:    mgc --apply team add %s\n", i.Login)
 			}
-			return nil
+			return nil, nil
 		}
 		s.printf("Accept at:    %s\n", i.URL)
 		s.printf("              (sign in to GitHub as %s first)\n", i.Name)
-		return nil
+		return []Message{s.teamInviteMessage(i)}, nil
 	}
 	ms, err := s.TeamMembers(team)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if login, ok := findMember(ms, who); ok {
 		s.printf("%s is already an active member of %s/%s; nothing to accept.\n", login, s.C.Organization, team)
-		return nil
+		return nil, nil
 	}
 	s.printf("%s is not a member of %s/%s and has no pending invitation\n", who, s.C.Organization, team)
 	s.printf("(an expired invitation may have been removed by GitHub). Add them with:\n  mgc --apply team add %s\n", who)
-	return nil
+	return nil, nil
 }

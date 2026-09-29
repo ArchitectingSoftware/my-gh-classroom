@@ -51,6 +51,7 @@ func classroomCmd() *cobra.Command {
 			CourseInfoURL:     "https://github.com/YOUR_GITHUB_ORGANIZATION/YOUR_COURSE_INFO_REPO",
 			CourseName:        strings.ToUpper(alias),
 			RepoPrefix:        "",
+			Instructors:       []string{},
 		}
 		if !apply {
 			fmt.Printf("DRY RUN   would add classroom '%s' to %s\n", alias, configPath)
@@ -58,6 +59,7 @@ func classroomCmd() *cobra.Command {
 			fmt.Printf("          course-info: %s\n", cl.CourseInfoRepo)
 			fmt.Printf("          course name: %s\n", cl.CourseName)
 			fmt.Printf("          repo prefix: %q\n", cl.RepoPrefix)
+			fmt.Printf("          instructors: [] (sign --message output; edit to add names)\n")
 			return nil
 		}
 		cfg.Classrooms[alias] = cl

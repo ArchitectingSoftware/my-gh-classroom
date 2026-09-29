@@ -97,11 +97,12 @@ func (s *Service) candidateRepos(repos []map[string]any) []map[string]any {
 
 // Invites prints pending invitations. With an empty query it reports
 // every student repository in the organization; otherwise it reports the
-// one student matching a GitHub ID or repository name.
-func (s *Service) Invites(query string) error {
+// one student matching a GitHub ID or repository name. It returns a
+// ready-to-paste message for each invitation that can still be accepted.
+func (s *Service) Invites(query string) ([]Message, error) {
 	repos, err := s.ListRepos()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if strings.TrimSpace(query) != "" {
 		return s.studentInvite(repos, strings.TrimSpace(query))
@@ -155,21 +156,27 @@ func (s *Service) Invites(query string) error {
 		s.println("  mgc --apply classroom import ROSTER.csv --repair     (everyone)")
 		s.println("  mgc student invites GITHUB_ID                         (shows the command for one student)")
 	}
+	var msgs []Message
+	for _, i := range all {
+		if !i.Expired {
+			msgs = append(msgs, s.studentInviteMessage(i))
+		}
+	}
 	if len(failed) > 0 {
 		s.printf("\nCould not read invitations for %d repositories:\n", len(failed))
 		for _, f := range failed {
 			s.printf("  %s\n", f)
 		}
-		return fmt.Errorf("could not read invitations for %d repositories", len(failed))
+		return msgs, fmt.Errorf("could not read invitations for %d repositories", len(failed))
 	}
-	return nil
+	return msgs, nil
 }
 
 // studentInvite reports the invitation state for one student.
-func (s *Service) studentInvite(repos []map[string]any, query string) error {
+func (s *Service) studentInvite(repos []map[string]any, query string) ([]Message, error) {
 	r, ok := findStudentRepo(repos, query, s.C.RepoPrefix)
 	if !ok {
-		return fmt.Errorf("no repository found for '%s' in %s", query, s.C.Organization)
+		return nil, fmt.Errorf("no repository found for '%s' in %s", query, s.C.Organization)
 	}
 	repo := str(r["name"])
 	name := repoProps(r)["student_name"]
@@ -182,13 +189,13 @@ func (s *Service) studentInvite(repos []map[string]any, query string) error {
 	}
 	invs, err := s.repoInvites(r)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	s.printf("Student:      %s\nGitHub:       %s\nRepository:   %s\n", name, login, str(r["html_url"]))
 	if len(invs) == 0 {
 		collab, err := s.IsCollaborator(repo, login)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if collab {
 			s.println("Invitation:   none pending; the student already has access")
@@ -196,8 +203,9 @@ func (s *Service) studentInvite(repos []map[string]any, query string) error {
 			s.println("Invitation:   none pending, and the student does not have access")
 			s.println("              invite them with: mgc --apply classroom import ROSTER.csv --repair")
 		}
-		return nil
+		return nil, nil
 	}
+	var msgs []Message
 	for _, i := range invs {
 		s.printf("Invitation:   %s\n", inviteStatus(i))
 		if !i.Created.IsZero() {
@@ -214,8 +222,9 @@ func (s *Service) studentInvite(repos []map[string]any, query string) error {
 		}
 		s.printf("Accept at:    %s\n", i.URL)
 		s.println("              (sign in to GitHub as " + i.Login + " first)")
+		msgs = append(msgs, s.studentInviteMessage(i))
 	}
-	return nil
+	return msgs, nil
 }
 
 // inviteStatus is a short human description, e.g. "pending, 5d left".

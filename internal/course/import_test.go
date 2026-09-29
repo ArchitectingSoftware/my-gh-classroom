@@ -57,7 +57,7 @@ func TestImportDryRunMakesNoChanges(t *testing.T) {
 	if m := f.mutations(); len(m) != 0 {
 		t.Fatalf("dry run performed mutations: %v", m)
 	}
-	if sum != (ImportSummary{Processed: 2, Created: 1, Skipped: 1}) {
+	if !sameCounts(sum, ImportSummary{Processed: 2, Created: 1, Skipped: 1}) {
 		t.Errorf("summary = %+v", sum)
 	}
 	o := out.String()
@@ -88,7 +88,7 @@ func TestImportApplyCreatesOnlyMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sum != (ImportSummary{Processed: 3, Created: 1, Skipped: 2}) {
+	if !sameCounts(sum, ImportSummary{Processed: 3, Created: 1, Skipped: 2}) {
 		t.Errorf("summary = %+v", sum)
 	}
 	for _, m := range f.mutations() {
@@ -139,7 +139,7 @@ func TestImportPerStudentErrorsDoNotStopTheRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sum != (ImportSummary{Processed: 6, Created: 1, Skipped: 1, Errors: 4}) {
+	if !sameCounts(sum, ImportSummary{Processed: 6, Created: 1, Skipped: 1, Errors: 4}) {
 		t.Errorf("summary = %+v", sum)
 	}
 	o := out.String()

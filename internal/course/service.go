@@ -218,11 +218,18 @@ func (s *Service) RemoveTeamMember(team, user string) error {
 
 // ---------------------------------------------------------------- users & repos
 
+// UserNotFoundError reports a GitHub username with no account.
+type UserNotFoundError struct{ User string }
+
+func (e *UserNotFoundError) Error() string {
+	return fmt.Sprintf("GitHub user '%s' does not exist", e.User)
+}
+
 func (s *Service) UserGet(user string) (map[string]any, error) {
 	var v map[string]any
 	err := s.json(&v, "api", fmt.Sprintf("users/%s", user))
 	if gh.IsNotFound(err) {
-		return nil, fmt.Errorf("GitHub user '%s' does not exist", user)
+		return nil, &UserNotFoundError{User: user}
 	}
 	if err != nil {
 		return nil, err

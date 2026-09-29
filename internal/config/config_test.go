@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -69,6 +70,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	cl := validClassroom()
 	cl.CourseName = "CS 281"
 	cl.RepoPrefix = "cs281-"
+	cl.Instructors = []string{"Prof. Mitchell", "Prof. Jones"}
 	in := Config{DefaultClassroom: "cs281", Classrooms: map[string]Classroom{"cs281": cl}}
 	if err := Save(p, in); err != nil {
 		t.Fatal(err)
@@ -77,7 +79,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.DefaultClassroom != "cs281" || out.Classrooms["cs281"] != cl {
+	if out.DefaultClassroom != "cs281" || !reflect.DeepEqual(out.Classrooms["cs281"], cl) {
 		t.Errorf("round trip mismatch: %+v", out)
 	}
 }
@@ -88,7 +90,7 @@ func TestSaveAlwaysWritesOptionalFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(p)
-	for _, k := range []string{`"course_name": ""`, `"repo_prefix": ""`} {
+	for _, k := range []string{`"course_name": ""`, `"repo_prefix": ""`, `"instructors": []`} {
 		if !strings.Contains(string(data), k) {
 			t.Errorf("config should always contain %s so the setting is discoverable:\n%s", k, data)
 		}

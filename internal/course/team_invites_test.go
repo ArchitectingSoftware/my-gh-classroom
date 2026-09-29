@@ -40,7 +40,7 @@ func TestTeamInvitesReport(t *testing.T) {
 	pinNow(t)
 	s, f, out := newService(t, false)
 	teamRoutes(f, `[]`, teamInvitesJSON)
-	if err := s.TeamInvitesReport("graders", ""); err != nil {
+	if _, err := s.TeamInvitesReport("graders", ""); err != nil {
 		t.Fatal(err)
 	}
 	o := out.String()
@@ -64,7 +64,7 @@ func TestTeamInvitesReport(t *testing.T) {
 func TestTeamInvitesReportNone(t *testing.T) {
 	s, f, out := newService(t, false)
 	teamRoutes(f, `[]`, `[]`)
-	if err := s.TeamInvitesReport("graders", ""); err != nil {
+	if _, err := s.TeamInvitesReport("graders", ""); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "everyone added to the team has accepted") {
@@ -76,7 +76,7 @@ func TestTeamInviteOnePending(t *testing.T) {
 	pinNow(t)
 	s, f, out := newService(t, false)
 	teamRoutes(f, `[]`, teamInvitesJSON)
-	if err := s.TeamInvitesReport("graders", "TA-BO"); err != nil {
+	if _, err := s.TeamInvitesReport("graders", "TA-BO"); err != nil {
 		t.Fatal(err)
 	}
 	o := out.String()
@@ -91,7 +91,7 @@ func TestTeamInviteOneFailedByEmail(t *testing.T) {
 	pinNow(t)
 	s, f, out := newService(t, false)
 	teamRoutes(f, `[]`, teamInvitesJSON)
-	if err := s.TeamInvitesReport("graders", "dee@drexel.edu"); err != nil {
+	if _, err := s.TeamInvitesReport("graders", "dee@drexel.edu"); err != nil {
 		t.Fatal(err)
 	}
 	o := out.String()
@@ -103,10 +103,10 @@ func TestTeamInviteOneFailedByEmail(t *testing.T) {
 func TestTeamInviteOneActiveOrUnknown(t *testing.T) {
 	s, f, out := newService(t, false)
 	teamRoutes(f, `[{"login":"TA-Al"}]`, `[]`)
-	if err := s.TeamInvitesReport("graders", "ta-al"); err != nil {
+	if _, err := s.TeamInvitesReport("graders", "ta-al"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.TeamInvitesReport("graders", "ghost"); err != nil {
+	if _, err := s.TeamInvitesReport("graders", "ghost"); err != nil {
 		t.Fatal(err)
 	}
 	o := out.String()

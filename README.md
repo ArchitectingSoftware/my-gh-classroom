@@ -39,6 +39,8 @@ GitHub API access. It does not store GitHub credentials.
 - Inspect student repository permissions and pending invitations.
 - Report pending invitations with the URL each student can use to
   accept, for the whole class or one student (`student invites`).
+- Generate short, ready-to-paste messages (`--message`) for students
+  and TAs, signed by the classroom's instructors.
 - Show TAs and graders who have not accepted their organization
   invitation, with the accept URL (`team invites`, `team list`).
 - Import students from any CSV roster (`classroom import`), as a
@@ -168,6 +170,29 @@ make test
 The tests use a fake GitHub CLI, so they need no network access or
 `gh` authentication.
 
+### Versions
+
+``` bash
+./mgc version       # version, commit, and Go/platform details
+./mgc --version     # just the version
+```
+
+Versions come from git tags. `make build`, `make install`, and
+`make release` stamp the binary with `git describe`, so a build of a
+tagged commit reports e.g. `v1.0.0`, and later commits report e.g.
+`v1.0.0-3-gabc1234` (with `-dirty` for uncommitted changes).
+`make version` prints the version a build would get. To cut a release:
+
+``` bash
+git tag v1.0.0
+git push origin v1.0.0
+make release        # binaries in dist/, named with the version
+```
+
+`mgc version` also shows the exact commit the binary was built from,
+marked `(modified)` for uncommitted changes, which is the first thing to
+ask for in a bug report. It works without a `config.json`.
+
 ## Configuration
 
 `mgc` supports multiple classrooms in one `config.json`.
@@ -213,7 +238,8 @@ A configuration can therefore look like:
       "course_info_repo": "course-info",
       "course_info_url": "https://github.com/CS472-Net-WI26/course-info",
       "course_name": "CS472",
-      "repo_prefix": ""
+      "repo_prefix": "",
+      "instructors": ["Dr. Brian Mitchell"]
     },
     "cs281": {
       "organization": "CS281-Arch-FA26",
@@ -223,7 +249,8 @@ A configuration can therefore look like:
       "course_info_repo": "course-info",
       "course_info_url": "https://github.com/CS281-Arch-FA26/course-info",
       "course_name": "CS281",
-      "repo_prefix": "cs281-"
+      "repo_prefix": "cs281-",
+      "instructors": ["Prof. Mitchell", "Prof. Jones"]
     }
   }
 }
@@ -241,6 +268,7 @@ A configuration can therefore look like:
 | `course_info_url`    | URL inserted into each student’s initial README.               |
 | `course_name`        | Optional course label for repo descriptions and READMEs. Defaults to the upper-cased alias. |
 | `repo_prefix`        | Optional prefix for student repository names: `cs281-` gives `cs281-jsmith42`. Defaults to none. |
+| `instructors`        | Optional list of names that sign `--message` notes, e.g. `["Dr. Brian Mitchell"]`. Defaults to “The <course_name> teaching team”. |
 
 `default_classroom` contains the classroom alias used when
 `--classroom`/`-c` is not supplied.
@@ -283,7 +311,8 @@ A new classroom is created with obvious placeholder values:
   "course_info_repo": "YOUR_COURSE_INFO_REPO",
   "course_info_url": "https://github.com/YOUR_GITHUB_ORGANIZATION/YOUR_COURSE_INFO_REPO",
   "course_name": "CS281",
-  "repo_prefix": ""
+  "repo_prefix": "",
+  "instructors": []
 }
 ```
 
@@ -508,6 +537,9 @@ Or one person, by GitHub username or invited email:
 ``` bash
 ./mgc team invites ta-bo
 ```
+
+Add `--message` for a ready-to-paste note to each person (see
+[Ready-to-Paste Messages](#ready-to-paste-messages)).
 
 `--team NAME` reports on a team other than the classroom's
 `grader_team`. Like student invitations, these expire after 7 days;
@@ -796,6 +828,11 @@ directory, which is overwritten on each run. It contains student names,
 so it is listed in `.gitignore`. The command exits non-zero if any
 student had an error.
 
+Add `--message` to get a note for each student whose GitHub username
+was blank, invalid, or not found on GitHub, asking them to resubmit
+(see [Ready-to-Paste Messages](#ready-to-paste-messages)). Problems only
+you can fix, such as a repository name conflict, get no message.
+
 If a repository is created but a later setup step fails, the error line
 says so and the run continues with the next student. Re-run with
 `--repair` to finish it:
@@ -867,7 +904,8 @@ This shows when the invitation was sent, when it expires, and the
 accept URL, or tells you the student has already accepted. Students who
 have accepted do not appear in the organization-wide list.
 `./mgc student info` also shows the accept URL for any pending
-invitation.
+invitation. Add `--message` to get a ready-to-paste note for each
+student (see [Ready-to-Paste Messages](#ready-to-paste-messages)).
 
 GitHub invitations **expire after 7 days**. Expired invitations are
 marked `EXPIRED` and no URL is offered, because the link no longer
@@ -881,6 +919,47 @@ each expired invitation and sends a fresh one:
 
 For one student, `./mgc student invites GITHUB_ID` prints the exact
 `mgc --apply student create ...` command that re-invites them.
+
+## Ready-to-Paste Messages
+
+`--message` turns a report into short notes you can paste into an email
+or a Canvas message. `mgc` never sends anything itself.
+
+``` bash
+./mgc student invites --message                # students who have not accepted yet
+./mgc team invites --message                   # TAs and graders who have not accepted yet
+./mgc classroom import roster.csv --message    # students whose GitHub username needs fixing
+```
+
+Each note is printed as a block with a `To:` line and a subject, and all
+of them are also saved to `messages.txt` in the current directory
+(overwritten on every run; it contains names, so keep it out of git):
+
+``` text
+========================================================================
+To:      Jane Smith (GitHub: jsmith42)
+Subject: CS472: accept your GitHub repository invitation
+
+Hi Jane,
+
+Your CS472 repository is ready. Accept the invitation here
+(sign in to GitHub as jsmith42 first):
+
+https://github.com/CS472-Net-WI26/jsmith42/invitations
+
+The invitation expires on Tuesday, October 6.
+
+Dr. Brian Mitchell
+========================================================================
+```
+
+Notes are signed with the classroom's `instructors`: one name as is,
+two as “A and B”, three or more as “A, B, and C”. With no instructors
+configured they are signed “The <course_name> teaching team”.
+
+Only invitations that can still be accepted get a note. Re-invite
+expired ones first (see [Student Invitations](#student-invitations)),
+then run `--message` again.
 
 ## Example: Two Concurrent Classes
 

@@ -71,9 +71,10 @@ while signed in to the invited GitHub account. They expire after 7 days;
 expired ones are marked and the person must be added again.`,
 		Example: `  mgc team invites              # everyone who has not accepted yet
   mgc team invites ta-alice     # one person
+  mgc team invites --message    # plus a ready-to-paste note for each
   mgc team invites --team staff # a team other than grader_team`,
 		Args: cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, a []string) error {
+		RunE: func(c *cobra.Command, a []string) error {
 			name := activeConfig.GraderTeam
 			if inviteTeam != "" {
 				name = inviteTeam
@@ -82,9 +83,14 @@ expired ones are marked and the person must be added again.`,
 			if len(a) == 1 {
 				who = a[0]
 			}
-			return svc.TeamInvitesReport(name, who)
+			msgs, err := svc.TeamInvitesReport(name, who)
+			if want, _ := c.Flags().GetBool("message"); want && err == nil {
+				err = emitMessages(msgs, "no pending invitations that can still be accepted")
+			}
+			return err
 		},
 	}
+	invites.Flags().Bool("message", false, "Also write a ready-to-paste message for each person (saved to "+messagesFile+")")
 	invites.Flags().StringVar(&inviteTeam, "team", "", "Team to report on (default: the classroom's grader_team)")
 	rem.Short = "Remove a member from a team, or cancel their pending invitation"
 	cmd.AddCommand(create, info, list, add, rem, invites)

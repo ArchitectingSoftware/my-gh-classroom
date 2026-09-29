@@ -30,6 +30,7 @@ func run(t *testing.T, cfgFile string, args ...string) error {
 	t.Helper()
 	apply, classroomAlias, configPath = false, "", ""
 	resultsFile = filepath.Join(t.TempDir(), "import-results.txt")
+	messagesFile = filepath.Join(t.TempDir(), "messages.txt")
 	if err := rejectLegacyArgs(args); err != nil {
 		return err
 	}
@@ -38,6 +39,7 @@ func run(t *testing.T, cfgFile string, args ...string) error {
 		_ = c.Flags().Set("name-column", "Name")
 		_ = c.Flags().Set("github-column", "GitHub-ID")
 		_ = c.Flags().Set("repair", "false")
+		_ = c.Flags().Set("message", "false")
 	}
 	rootCmd.SetArgs(append([]string{"--config", cfgFile}, args...))
 	return rootCmd.Execute()
@@ -179,5 +181,16 @@ func TestLegacyClassroomFlagIsRejected(t *testing.T) {
 	err := run(t, tempConfig(t), "-cr", "cs472", "student", "list")
 	if err == nil || !strings.Contains(err.Error(), "use --classroom or -c") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestNewClassroomHasInstructors(t *testing.T) {
+	p := tempConfig(t)
+	if err := run(t, p, "--apply", "classroom", "create", "cs281"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(p)
+	if !strings.Contains(string(data), `"instructors": []`) {
+		t.Errorf("new classroom should show instructors:\n%s", data)
 	}
 }

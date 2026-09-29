@@ -222,7 +222,7 @@ func TestImportRepairApply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sum != (ImportSummary{Processed: 2, Repaired: 1, Skipped: 1}) {
+	if !sameCounts(sum, ImportSummary{Processed: 2, Repaired: 1, Skipped: 1}) {
 		t.Errorf("summary %+v\n%s", sum, out)
 	}
 	o := out.String()

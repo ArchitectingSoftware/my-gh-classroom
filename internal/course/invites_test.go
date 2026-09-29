@@ -39,7 +39,7 @@ func TestInvitesReportForWholeOrg(t *testing.T) {
 	pinNow(t)
 	s, f, out := newService(t, false)
 	inviteRoutes(f)
-	if err := s.Invites(""); err != nil {
+	if _, err := s.Invites(""); err != nil {
 		t.Fatal(err)
 	}
 	o := out.String()
@@ -76,7 +76,7 @@ func TestInvitesReportNonePending(t *testing.T) {
 	s, f, out := newService(t, false)
 	f.repos(`[{"name":"bob3","custom_properties":{"repo_type":"student","github_id":"bob3"}}]`).
 		on("GET", repoPath("bob3", "invitations"), `[]`)
-	if err := s.Invites(""); err != nil {
+	if _, err := s.Invites(""); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "every invited student has accepted") {
@@ -88,7 +88,7 @@ func TestInvitesReportContinuesPastUnreadableRepo(t *testing.T) {
 	pinNow(t)
 	s, f, out := newService(t, false)
 	inviteRoutes(f).fail("GET", repoPath("amy2", "invitations"), errWithArgs("gh: Forbidden (HTTP 403)"))
-	err := s.Invites("")
+	_, err := s.Invites("")
 	if err == nil || !strings.Contains(err.Error(), "1 repositories") {
 		t.Fatalf("err = %v", err)
 	}
@@ -102,7 +102,7 @@ func TestInviteForOneStudent(t *testing.T) {
 	pinNow(t)
 	s, f, out := newService(t, false)
 	inviteRoutes(f)
-	if err := s.Invites("ZED1"); err != nil {
+	if _, err := s.Invites("ZED1"); err != nil {
 		t.Fatal(err)
 	}
 	o := out.String()
@@ -124,7 +124,7 @@ func TestInviteForOneStudentByPrefixedRepo(t *testing.T) {
 	s, f, out := newService(t, false)
 	s.C.RepoPrefix = "cs472-"
 	inviteRoutes(f)
-	if err := s.Invites("cat4"); err != nil {
+	if _, err := s.Invites("cat4"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "Accept at:    https://github.com/"+org+"/cs472-cat4/invitations") {
@@ -136,7 +136,7 @@ func TestInviteForOneStudentExpired(t *testing.T) {
 	pinNow(t)
 	s, f, out := newService(t, false)
 	inviteRoutes(f)
-	if err := s.Invites("amy2"); err != nil {
+	if _, err := s.Invites("amy2"); err != nil {
 		t.Fatal(err)
 	}
 	o := out.String()
@@ -153,7 +153,7 @@ func TestInviteExpiredFlagFromAPI(t *testing.T) {
 	s, f, out := newService(t, false)
 	f.repos(`[{"name":"dan5","html_url":"u/dan5","custom_properties":{"repo_type":"student","github_id":"dan5"}}]`).
 		on("GET", repoPath("dan5", "invitations"), `[{"invitee":{"login":"dan5"},"created_at":"2026-09-29T00:00:00Z","expired":true}]`)
-	if err := s.Invites("dan5"); err != nil {
+	if _, err := s.Invites("dan5"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "EXPIRED") {
@@ -164,7 +164,7 @@ func TestInviteExpiredFlagFromAPI(t *testing.T) {
 func TestInviteForOneStudentAlreadyAccepted(t *testing.T) {
 	s, f, out := newService(t, false)
 	inviteRoutes(f).on("GET", repoPath("bob3", "collaborators/bob3"), ``)
-	if err := s.Invites("bob3"); err != nil {
+	if _, err := s.Invites("bob3"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "already has access") {
@@ -175,7 +175,7 @@ func TestInviteForOneStudentAlreadyAccepted(t *testing.T) {
 func TestInviteForOneStudentNoAccessNoInvite(t *testing.T) {
 	s, f, out := newService(t, false)
 	inviteRoutes(f).fail("GET", repoPath("bob3", "collaborators/bob3"), errNotFound)
-	if err := s.Invites("bob3"); err != nil {
+	if _, err := s.Invites("bob3"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "does not have access") || !strings.Contains(out.String(), "--repair") {
@@ -186,7 +186,7 @@ func TestInviteForOneStudentNoAccessNoInvite(t *testing.T) {
 func TestInviteForUnknownStudent(t *testing.T) {
 	s, f, _ := newService(t, false)
 	inviteRoutes(f)
-	if err := s.Invites("nobody"); err == nil || !strings.Contains(err.Error(), "no repository found for 'nobody'") {
+	if _, err := s.Invites("nobody"); err == nil || !strings.Contains(err.Error(), "no repository found for 'nobody'") {
 		t.Fatalf("err = %v", err)
 	}
 }

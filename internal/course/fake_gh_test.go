@@ -164,3 +164,9 @@ func errWithArgs(detail string) error {
 }
 
 var ghErr409 = gh.Error{Detail: "gh: Git Repository is empty. (HTTP 409)"}
+
+// sameCounts compares the tallies of two summaries, ignoring Messages.
+func sameCounts(a, b ImportSummary) bool {
+	return a.Processed == b.Processed && a.Created == b.Created && a.Repaired == b.Repaired &&
+		a.Skipped == b.Skipped && a.Errors == b.Errors
+}

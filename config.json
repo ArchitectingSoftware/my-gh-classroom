@@ -9,7 +9,8 @@
       "course_info_repo": "course-info",
       "course_info_url": "https://github.com/CS472-Net-WI26/course-info/blob/main/readme.md",
       "course_name": "CS472",
-      "repo_prefix": ""
+      "repo_prefix": "",
+      "instructors": []
     }
   }
 }

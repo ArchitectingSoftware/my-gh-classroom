@@ -34,6 +34,10 @@ type Classroom struct {
 	// defaults to "" (the repository is named after the GitHub ID).
 	// Always written (even when empty) so the setting is visible.
 	RepoPrefix string `json:"repo_prefix"`
+	// Instructors sign messages generated with --message, e.g.
+	// ["Dr. Brian Mitchell"]. Optional; when empty, messages are signed
+	// "The <course_name> teaching team". Always written (as [] when empty).
+	Instructors []string `json:"instructors"`
 }
 
 type Config struct {
@@ -95,6 +99,14 @@ func Load(path string) (Config, error) {
 
 func Save(path string, c Config) error {
 	path = ResolvePath(path)
+	// Write optional list settings as [] rather than null so they stay
+	// visible and easy to fill in.
+	for alias, cl := range c.Classrooms {
+		if cl.Instructors == nil {
+			cl.Instructors = []string{}
+			c.Classrooms[alias] = cl
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("could not create config directory: %w", err)
 	}
