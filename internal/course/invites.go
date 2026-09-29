@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/ArchitectingSoftware/my-gh-classroom/internal/gh"
 )
 
 // InviteLifetime is how long GitHub keeps a repository invitation open.
@@ -62,9 +64,19 @@ func (s *Service) repoInvites(r map[string]any) ([]Invite, error) {
 		if n == "" {
 			n = login
 		}
-		out = append(out, Invite{Name: n, Login: login, Repo: repo, URL: inviteURL(s.C.Organization, repo, inv), Created: created, Expired: expired})
+		out = append(out, Invite{ID: idString(inv["id"]), Name: n, Login: login, Repo: repo, URL: inviteURL(s.C.Organization, repo, inv), Created: created, Expired: expired})
 	}
 	return out, nil
+}
+
+// cancelRepoInvite deletes a repository invitation. An invitation that is
+// already gone is not an error.
+func (s *Service) cancelRepoInvite(repo, id string) error {
+	_, err := s.GH.Run("api", "--method", "DELETE", fmt.Sprintf("repos/%s/%s/invitations/%s", s.C.Organization, repo, id))
+	if gh.IsNotFound(err) {
+		return nil
+	}
+	return err
 }
 
 // candidateRepos are repositories that may hold student invitations:
@@ -139,7 +151,9 @@ func (s *Service) Invites(query string) error {
 	s.println()
 	s.println("Students must be signed in to the invited GitHub account to accept.")
 	if expired > 0 {
-		s.println("EXPIRED invitations no longer work; the student must be invited again.")
+		s.println("EXPIRED invitations no longer work. Re-invite with:")
+		s.println("  mgc --apply classroom import ROSTER.csv --repair     (everyone)")
+		s.println("  mgc student invites GITHUB_ID                         (shows the command for one student)")
 	}
 	if len(failed) > 0 {
 		s.printf("\nCould not read invitations for %d repositories:\n", len(failed))
@@ -195,6 +209,7 @@ func (s *Service) studentInvite(repos []map[string]any, query string) error {
 		}
 		if i.Expired {
 			s.println("Accept at:    (expired; the student must be invited again)")
+			s.printf("Re-invite:    mgc --apply student create --name %q --github %s --repo %s\n", name, login, repo)
 			continue
 		}
 		s.printf("Accept at:    %s\n", i.URL)

@@ -446,7 +446,8 @@ INVITED   ta-bo to 'graders'; they must accept the organization invitation
 ```
 
 Running `team add` again for someone whose invitation is still pending
-is skipped, and the accept URL is shown again.
+is skipped, and the accept URL is shown again. If their invitation has
+expired, `team add` sends a new one.
 
 List graders, including people who have been invited but have not yet
 accepted:
@@ -510,8 +511,12 @@ Or one person, by GitHub username or invited email:
 
 `--team NAME` reports on a team other than the classroom's
 `grader_team`. Like student invitations, these expire after 7 days;
-expired or failed invitations get no URL because the person has to be
-invited again.
+expired or failed invitations get no URL. Re-invite with `team add`,
+which cancels the old invitation and sends a new one (`REINVITED`):
+
+``` bash
+./mgc --apply team add ta-cy
+```
 
 The grader team must exist before members can be added. `mgc`
 deliberately avoids silently creating prerequisites as side effects.
@@ -625,7 +630,9 @@ For a new repository, `mgc`:
 If the repository already exists, `mgc` checks it and repairs whatever
 is missing:
 
-- the student has access (a pending invitation counts);
+- the student has access. A pending invitation counts; an **expired**
+  invitation is cancelled and a new one is sent (the student gets a new
+  email and a working link);
 - the grader team is connected;
 - the custom properties are set (only empty ones are filled); and
 - the course README is present, **only** if the repository is empty or
@@ -864,7 +871,16 @@ invitation.
 
 GitHub invitations **expire after 7 days**. Expired invitations are
 marked `EXPIRED` and no URL is offered, because the link no longer
-works: the student has to be invited again.
+works. Re-invite them with the roster import's repair, which cancels
+each expired invitation and sends a fresh one:
+
+``` bash
+./mgc classroom import roster.csv --repair            # review first
+./mgc --apply classroom import roster.csv --repair
+```
+
+For one student, `./mgc student invites GITHUB_ID` prints the exact
+`mgc --apply student create ...` command that re-invites them.
 
 ## Example: Two Concurrent Classes
 

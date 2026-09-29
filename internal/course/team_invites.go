@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ArchitectingSoftware/my-gh-classroom/internal/gh"
 )
 
 // Adding someone who is not yet in the organization to a team sends them
@@ -61,6 +63,16 @@ func (s *Service) TeamInvites(team string) ([]Invite, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
 	return out, nil
+}
+
+// cancelOrgInvite cancels an organization invitation. One that is already
+// gone is not an error.
+func (s *Service) cancelOrgInvite(id string) error {
+	_, err := s.GH.Run("api", "--method", "DELETE", fmt.Sprintf("orgs/%s/invitations/%s", s.C.Organization, id))
+	if gh.IsNotFound(err) {
+		return nil
+	}
+	return err
 }
 
 // findInvite matches a username or email, case-insensitively.
@@ -137,7 +149,8 @@ func (s *Service) TeamInvitesReport(team, who string) error {
 	s.println()
 	s.println("They must be signed in to the invited GitHub account to accept.")
 	if unusable > 0 {
-		s.println("EXPIRED or FAILED invitations no longer work; the person must be invited again.")
+		s.println("EXPIRED or FAILED invitations no longer work. Re-invite with:")
+		s.println("  mgc --apply team add USERNAME")
 	}
 	return nil
 }
@@ -154,6 +167,9 @@ func (s *Service) teamInviteOne(team, who string, invs []Invite) error {
 		}
 		if !i.usable() {
 			s.println("Accept at:    (no longer valid; the person must be invited again)")
+			if i.Login != "" {
+				s.printf("Re-invite:    mgc --apply team add %s\n", i.Login)
+			}
 			return nil
 		}
 		s.printf("Accept at:    %s\n", i.URL)

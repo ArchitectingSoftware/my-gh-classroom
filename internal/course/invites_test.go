@@ -53,7 +53,7 @@ func TestInvitesReportForWholeOrg(t *testing.T) {
 		"EXPIRED",
 		"https://github.com/" + org + "/cs472-cat4/invitations", // constructed when html_url is absent
 		"pending, 6d left",
-		"must be invited again",
+		"mgc --apply classroom import ROSTER.csv --repair",
 		"(expired: invite again)",
 	} {
 		if !strings.Contains(o, want) {
@@ -142,6 +142,9 @@ func TestInviteForOneStudentExpired(t *testing.T) {
 	o := out.String()
 	if !strings.Contains(o, "Invitation:   EXPIRED") || strings.Contains(o, "Accept at:    https://") {
 		t.Errorf("expired invitation must not offer a URL:\n%s", o)
+	}
+	if !strings.Contains(o, `Re-invite:    mgc --apply student create --name "Amy Adams" --github amy2 --repo amy2`) {
+		t.Errorf("expired invitation should give the re-invite command:\n%s", o)
 	}
 }
 

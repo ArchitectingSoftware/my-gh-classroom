@@ -141,13 +141,24 @@ func (s *Service) AddTeamMember(team, user string) error {
 	if err != nil {
 		return err
 	}
-	if i, ok := findInvite(invs, login); ok && i.usable() {
-		s.printf("SKIP      %s has already been invited to '%s' (%s)\n          accept at: %s\n", login, team, inviteStatus(i), i.URL)
+	old, invited := findInvite(invs, login)
+	if invited && old.usable() {
+		s.printf("SKIP      %s has already been invited to '%s' (%s)\n          accept at: %s\n", login, team, inviteStatus(old), old.URL)
 		return nil
 	}
+	reinvite := invited // present but expired or failed
 	if !s.Apply {
-		s.printf("DRY RUN   would add %s to '%s'\n          (GitHub sends an invitation if they are not yet in %s)\n", login, team, s.C.Organization)
+		if reinvite {
+			s.printf("DRY RUN   would re-invite %s to '%s' (previous invitation %s)\n", login, team, strings.ToLower(inviteStatus(old)))
+		} else {
+			s.printf("DRY RUN   would add %s to '%s'\n          (GitHub sends an invitation if they are not yet in %s)\n", login, team, s.C.Organization)
+		}
 		return nil
+	}
+	if reinvite {
+		if err := s.cancelOrgInvite(old.ID); err != nil {
+			return fmt.Errorf("could not cancel the old invitation for %s: %w", login, err)
+		}
 	}
 	out, err := s.GH.Run("api", "--method", "PUT", fmt.Sprintf("orgs/%s/teams/%s/memberships/%s", s.C.Organization, team, login), "-f", "role=member")
 	if err != nil {
@@ -156,7 +167,11 @@ func (s *Service) AddTeamMember(team, user string) error {
 	var m map[string]any
 	_ = json.Unmarshal(out, &m) // an unreadable body just means we can't tell pending from active
 	if str(m["state"]) == "pending" {
-		s.printf("INVITED   %s to '%s'; they must accept the organization invitation\n          accept at: %s (signed in as %s)\n", login, team, s.OrgInviteURL(), login)
+		verb := "INVITED  "
+		if reinvite {
+			verb = "REINVITED"
+		}
+		s.printf("%s %s to '%s'; they must accept the organization invitation\n          accept at: %s (signed in as %s)\n", verb, login, team, s.OrgInviteURL(), login)
 		return nil
 	}
 	s.printf("ADDED     %s to '%s'\n", login, team)
@@ -194,7 +209,7 @@ func (s *Service) RemoveTeamMember(team, user string) error {
 		s.printf("DRY RUN   would cancel the pending invitation for %s to '%s'\n          (this cancels their organization invitation to %s)\n", i.Name, team, s.C.Organization)
 		return nil
 	}
-	if _, err := s.GH.Run("api", "--method", "DELETE", fmt.Sprintf("orgs/%s/invitations/%s", s.C.Organization, i.ID)); err != nil {
+	if err := s.cancelOrgInvite(i.ID); err != nil {
 		return err
 	}
 	s.printf("CANCELLED invitation for %s to '%s'\n", i.Name, team)
@@ -303,19 +318,6 @@ func (s *Service) PendingInvitations(repo string) ([]map[string]any, error) {
 func invitee(inv map[string]any) string {
 	who, _ := inv["invitee"].(map[string]any)
 	return str(who["login"])
-}
-
-func (s *Service) hasPendingInvitation(repo, user string) (bool, error) {
-	invs, err := s.PendingInvitations(repo)
-	if err != nil {
-		return false, err
-	}
-	for _, inv := range invs {
-		if strings.EqualFold(invitee(inv), user) {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func permissionFromMap(v map[string]any) string {
@@ -601,11 +603,24 @@ func (s *Service) planRepair(repoName, slug, name, login string) (*repairPlan, e
 		return nil, err
 	}
 	if !collab {
-		pending, err := s.hasPendingInvitation(repoName, login)
+		invs, err := s.repoInvites(map[string]any{"name": repoName})
 		if err != nil {
 			return nil, err
 		}
-		if !pending {
+		inv, invited := findInvite(invs, login)
+		switch {
+		case invited && !inv.Expired:
+			// A live invitation counts as access; the student just has to accept.
+		case invited:
+			// Expired: cancel it and send a fresh one (new email, working link).
+			plan.add(fmt.Sprintf("re-invite %s with: %s (previous invitation expired)", login, s.C.StudentPermission),
+				func() error {
+					if err := s.cancelRepoInvite(repoName, inv.ID); err != nil {
+						return err
+					}
+					return s.grantStudent(repoName, login)
+				})
+		default:
 			plan.add(fmt.Sprintf("add student collaborator %s with: %s", login, s.C.StudentPermission),
 				func() error { return s.grantStudent(repoName, login) })
 		}
