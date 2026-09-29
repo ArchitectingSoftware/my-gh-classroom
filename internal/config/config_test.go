@@ -39,6 +39,9 @@ func TestValidateClassroom(t *testing.T) {
 		{"repo prefix", "cs281", func(c *Classroom) { c.RepoPrefix = "cs281-fa26_" }, ""},
 		{"repo prefix with space", "cs281", func(c *Classroom) { c.RepoPrefix = "cs 281-" }, "invalid repo_prefix"},
 		{"repo prefix with slash", "cs281", func(c *Classroom) { c.RepoPrefix = "cs281/" }, "invalid repo_prefix"},
+		{"repo name case lower", "cs281", func(c *Classroom) { c.RepoNameCase = "lower" }, ""},
+		{"repo name case preserve", "cs281", func(c *Classroom) { c.RepoNameCase = "preserve" }, ""},
+		{"repo name case invalid", "cs281", func(c *Classroom) { c.RepoNameCase = "upper" }, "invalid repo_name_case"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -70,6 +73,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	cl := validClassroom()
 	cl.CourseName = "CS 281"
 	cl.RepoPrefix = "cs281-"
+	cl.RepoNameCase = RepoNameCasePreserve
 	cl.Instructors = []string{"Prof. Mitchell", "Prof. Jones"}
 	in := Config{DefaultClassroom: "cs281", Classrooms: map[string]Classroom{"cs281": cl}}
 	if err := Save(p, in); err != nil {
@@ -90,7 +94,7 @@ func TestSaveAlwaysWritesOptionalFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(p)
-	for _, k := range []string{`"course_name": ""`, `"repo_prefix": ""`, `"instructors": []`} {
+	for _, k := range []string{`"course_name": ""`, `"repo_prefix": ""`, `"repo_name_case": "lower"`, `"instructors": []`} {
 		if !strings.Contains(string(data), k) {
 			t.Errorf("config should always contain %s so the setting is discoverable:\n%s", k, data)
 		}
@@ -195,5 +199,26 @@ func TestNormalizeRepoPrefix(t *testing.T) {
 		if got := NormalizeRepoPrefix(in); got != want {
 			t.Errorf("NormalizeRepoPrefix(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestRepoNameCaseDefaultsToLower(t *testing.T) {
+	c := Config{DefaultClassroom: "cs281", Classrooms: map[string]Classroom{"cs281": validClassroom()}}
+	cl, err := c.Classroom("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cl.RepoNameCase != RepoNameCaseLower {
+		t.Errorf("RepoNameCase = %q, want %q", cl.RepoNameCase, RepoNameCaseLower)
+	}
+}
+
+func TestSaveDoesNotModifyCaller(t *testing.T) {
+	in := Config{Classrooms: map[string]Classroom{"cs281": validClassroom()}}
+	if err := Save(filepath.Join(t.TempDir(), "config.json"), in); err != nil {
+		t.Fatal(err)
+	}
+	if got := in.Classrooms["cs281"]; got.RepoNameCase != "" || got.Instructors != nil {
+		t.Errorf("Save modified the caller's classroom: %+v", got)
 	}
 }

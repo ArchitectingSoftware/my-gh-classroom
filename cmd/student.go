@@ -10,12 +10,16 @@ func studentCmd() *cobra.Command {
 		name, _ := cmd.Flags().GetString("name")
 		github, _ := cmd.Flags().GetString("github")
 		repo, _ := cmd.Flags().GetString("repo")
+		if keep, _ := cmd.Flags().GetBool("keep-case"); keep {
+			svc.KeepCase = true
+		}
 		_, err := svc.CreateStudentRepo(name, github, repo)
 		return err
 	}}
 	create.Flags().String("name", "", "Student name")
 	create.Flags().String("github", "", "Student GitHub username")
-	create.Flags().String("repo", "", "Repository name (default: the classroom's repo_prefix + GitHub ID)")
+	create.Flags().String("repo", "", "Repository name, used exactly as given (default: the classroom's repo_prefix + GitHub ID)")
+	create.Flags().Bool("keep-case", false, "Keep the case of repo_prefix and the GitHub ID in the repository name instead of lowercasing it")
 	_ = create.MarkFlagRequired("name")
 	_ = create.MarkFlagRequired("github")
 	list := &cobra.Command{Use: "list", RunE: func(_ *cobra.Command, _ []string) error { return svc.StudentList() }}

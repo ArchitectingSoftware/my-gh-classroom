@@ -22,6 +22,7 @@ func importCmd() *cobra.Command {
 		githubColumn string
 		repair       bool
 		message      bool
+		keepCase     bool
 	)
 	c := &cobra.Command{
 		Use:   "import ROSTER_CSV",
@@ -41,7 +42,10 @@ CSV) can be used as-is. The file is checked for both columns before
 GitHub is contacted.
 
 Each repository is named <repo_prefix><GitHub ID>, where repo_prefix is
-set per classroom in config.json (default: no prefix).
+set per classroom in config.json (default: no prefix). Names are
+lowercased unless the classroom sets "repo_name_case": "preserve" or
+--keep-case is given, in which case the prefix and the GitHub ID keep
+their case (the ID as GitHub reports it, not as typed in the CSV).
 
 This is an upsert: students who already have a repository are skipped
 and nothing about their repository is changed, so the same file can be
@@ -78,6 +82,9 @@ A report is printed as students are processed and also written to
 		RunE: func(_ *cobra.Command, args []string) error {
 			if number < 0 {
 				return fmt.Errorf("--number must be a positive number of records, got %d", number)
+			}
+			if keepCase {
+				svc.KeepCase = true
 			}
 			path := args[0]
 			students, err := roster.ReadFile(path, roster.Options{Limit: number, NameColumn: nameColumn, GitHubColumn: githubColumn})
@@ -125,6 +132,7 @@ A report is printed as students are processed and also written to
 	c.Flags().StringVar(&nameColumn, "name-column", roster.NameColumn, "CSV column containing student names")
 	c.Flags().StringVar(&githubColumn, "github-column", roster.GitHubColumn, "CSV column containing GitHub usernames")
 	c.Flags().BoolVar(&repair, "repair", false, "Check existing repositories and fix anything missing instead of skipping them")
+	c.Flags().BoolVar(&keepCase, "keep-case", false, "Keep the case of repo_prefix and GitHub IDs in repository names instead of lowercasing them")
 	c.Flags().BoolVar(&message, "message", false, "Also write a ready-to-paste note for each student whose GitHub username is blank, invalid, or not found (saved to "+messagesFile+")")
 	return c
 }

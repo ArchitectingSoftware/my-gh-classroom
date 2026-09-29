@@ -15,6 +15,12 @@ const (
 	DefaultGraderPermission  = "push"
 	DefaultStudentPermission = "push"
 	DefaultCourseInfoRepo    = "course-info"
+
+	// RepoNameCaseLower lowercases student repository names (the default).
+	RepoNameCaseLower = "lower"
+	// RepoNameCasePreserve keeps the case of repo_prefix and the student's
+	// GitHub login as GitHub reports it.
+	RepoNameCasePreserve = "preserve"
 )
 
 type Classroom struct {
@@ -35,6 +41,12 @@ type Classroom struct {
 	// defaults to "" (the repository is named after the GitHub ID).
 	// Always written (even when empty) so the setting is visible.
 	RepoPrefix string `json:"repo_prefix"`
+	// RepoNameCase controls the case of generated student repository
+	// names: "lower" (default) gives "cs472-jsmith42"; "preserve" keeps
+	// the prefix and GitHub login as-is, e.g. "CS472-JSmith42". GitHub
+	// treats repository names case-insensitively, so this only affects
+	// how names look. Always written so the setting is visible.
+	RepoNameCase string `json:"repo_name_case"`
 	// Instructors sign messages generated with --message, e.g.
 	// ["Dr. Brian Mitchell"]. Optional; when empty, messages are signed
 	// "The <course_name> teaching team". Always written (as [] when empty).
@@ -100,13 +112,22 @@ func Load(path string) (Config, error) {
 
 func Save(path string, c Config) error {
 	path = ResolvePath(path)
-	// Write optional list settings as [] rather than null so they stay
-	// visible and easy to fill in.
+	// Write optional settings explicitly (lists as [] rather than null,
+	// repo_name_case as its default) so they stay visible and easy to
+	// change. Work on a copy so the caller's config is not modified.
+	classrooms := make(map[string]Classroom, len(c.Classrooms))
+	for alias, cl := range c.Classrooms {
+		classrooms[alias] = cl
+	}
+	c.Classrooms = classrooms
 	for alias, cl := range c.Classrooms {
 		if cl.Instructors == nil {
 			cl.Instructors = []string{}
-			c.Classrooms[alias] = cl
 		}
+		if cl.RepoNameCase == "" {
+			cl.RepoNameCase = RepoNameCaseLower
+		}
+		c.Classrooms[alias] = cl
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("could not create config directory: %w", err)
@@ -174,6 +195,9 @@ func applyDefaults(c Classroom) Classroom {
 	if c.CourseInfoRepo == "" {
 		c.CourseInfoRepo = DefaultCourseInfoRepo
 	}
+	if c.RepoNameCase == "" {
+		c.RepoNameCase = RepoNameCaseLower
+	}
 	return c
 }
 
@@ -208,6 +232,9 @@ func ValidateClassroom(alias string, c Classroom) error {
 	}
 	if !repoPrefixRE.MatchString(c.RepoPrefix) {
 		return fmt.Errorf("classroom '%s' has invalid repo_prefix '%s'; use up to 60 letters, digits, '.', '_', or '-'", alias, c.RepoPrefix)
+	}
+	if c.RepoNameCase != RepoNameCaseLower && c.RepoNameCase != RepoNameCasePreserve {
+		return fmt.Errorf("classroom '%s' has invalid repo_name_case '%s'; use \"lower\" or \"preserve\"", alias, c.RepoNameCase)
 	}
 	valid := map[string]bool{"pull": true, "triage": true, "push": true, "maintain": true, "admin": true}
 	if !valid[c.GraderPermission] || !valid[c.StudentPermission] {

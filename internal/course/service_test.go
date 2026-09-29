@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/ArchitectingSoftware/my-gh-classroom/internal/config"
 )
 
 func TestStr(t *testing.T) {
@@ -65,13 +67,13 @@ func TestCreateStudentRepoDryRunMakesNoMutations(t *testing.T) {
 func TestCreateStudentRepoApply(t *testing.T) {
 	s, f, out := newService(t, true)
 	f.team().user("JSmith42").
-		fail("GET", repoPath("JSmith42", ""), errNotFound).
+		fail("GET", repoPath("jsmith42", ""), errNotFound).
 		on("POST", "orgs/"+org+"/repos", `{}`).
-		on("GET", repoPath("JSmith42", "contents/README.md"), `{"sha":"abc123"}`).
-		on("PUT", repoPath("JSmith42", "contents/README.md"), `{}`).
-		on("PUT", teamRepoPath("JSmith42"), ``).
-		on("PUT", repoPath("JSmith42", "collaborators/JSmith42"), `{}`).
-		on("PATCH", repoPath("JSmith42", "properties/values"), ``)
+		on("GET", repoPath("jsmith42", "contents/README.md"), `{"sha":"abc123"}`).
+		on("PUT", repoPath("jsmith42", "contents/README.md"), `{}`).
+		on("PUT", teamRepoPath("jsmith42"), ``).
+		on("PUT", repoPath("jsmith42", "collaborators/JSmith42"), `{}`).
+		on("PATCH", repoPath("jsmith42", "properties/values"), ``)
 
 	res, err := s.CreateStudentRepo("Jane Smith", "JSmith42", "")
 	if err != nil {
@@ -83,10 +85,10 @@ func TestCreateStudentRepoApply(t *testing.T) {
 
 	want := []string{
 		"POST orgs/" + org + "/repos",
-		"PUT " + repoPath("JSmith42", "contents/README.md"),
-		"PUT " + teamRepoPath("JSmith42"),
-		"PUT " + repoPath("JSmith42", "collaborators/JSmith42"),
-		"PATCH " + repoPath("JSmith42", "properties/values"),
+		"PUT " + repoPath("jsmith42", "contents/README.md"),
+		"PUT " + teamRepoPath("jsmith42"),
+		"PUT " + repoPath("jsmith42", "collaborators/JSmith42"),
+		"PATCH " + repoPath("jsmith42", "properties/values"),
 	}
 	if got := f.mutations(); !reflect.DeepEqual(got, want) {
 		t.Errorf("mutations:\n got %v\nwant %v", got, want)
@@ -96,11 +98,14 @@ func TestCreateStudentRepoApply(t *testing.T) {
 	if !contains(create.Fields, "description=CS281 student repository for Jane Smith") {
 		t.Errorf("repo description not course-specific: %v", create.Fields)
 	}
+	if !contains(create.Fields, "name=jsmith42") {
+		t.Errorf("repo name should be lowercase: %v", create.Fields)
+	}
 	if !contains(create.Fields, "private=true") {
 		t.Errorf("repo not private: %v", create.Fields)
 	}
 
-	readme, _ := f.find("PUT", repoPath("JSmith42", "contents/README.md"))
+	readme, _ := f.find("PUT", repoPath("jsmith42", "contents/README.md"))
 	if !contains(readme.Fields, "sha=abc123") {
 		t.Errorf("README update missing sha: %v", readme.Fields)
 	}
@@ -109,7 +114,7 @@ func TestCreateStudentRepoApply(t *testing.T) {
 		t.Errorf("README content wrong:\n%s", content)
 	}
 
-	props, _ := f.find("PATCH", repoPath("JSmith42", "properties/values"))
+	props, _ := f.find("PATCH", repoPath("jsmith42", "properties/values"))
 	if !contains(props.Args, "--input") {
 		t.Errorf("properties PATCH must pass --input - so gh reads the body: %v", props.Args)
 	}
@@ -556,4 +561,41 @@ func decodeProps(t *testing.T, input []byte) map[string]string {
 		out[p.Name] = p.Value
 	}
 	return out
+}
+
+func TestRepoNameCase(t *testing.T) {
+	cases := []struct {
+		name     string
+		caseMode string
+		keepCase bool
+		want     string
+	}{
+		{"default lowercases", "", false, "cs281-jsmith42"},
+		{"lower lowercases", config.RepoNameCaseLower, false, "cs281-jsmith42"},
+		{"preserve keeps case", config.RepoNameCasePreserve, false, "CS281-JSmith42"},
+		{"--keep-case overrides lower", config.RepoNameCaseLower, true, "CS281-JSmith42"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _ := newService(t, false)
+			s.C.RepoPrefix = "CS281"
+			s.C.RepoNameCase = tc.caseMode
+			s.KeepCase = tc.keepCase
+			if got := s.RepoName("JSmith42"); got != tc.want {
+				t.Errorf("RepoName = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCreateStudentRepoKeepCaseDryRun(t *testing.T) {
+	s, f, out := newService(t, false)
+	s.KeepCase = true
+	f.team().on("GET", "users/jsmith42", `{"login":"JSmith42"}`).fail("GET", repoPath("JSmith42", ""), errNotFound)
+	if _, err := s.CreateStudentRepo("Jane Smith", "jsmith42", ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "would create private repo "+org+"/JSmith42") {
+		t.Errorf("expected case-preserved repo name (login as GitHub reports it):\n%s", out)
+	}
 }

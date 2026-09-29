@@ -239,6 +239,7 @@ A configuration can therefore look like:
       "course_info_url": "https://github.com/CS472-Net-WI26/course-info",
       "course_name": "CS472",
       "repo_prefix": "",
+      "repo_name_case": "lower",
       "instructors": ["Dr. Brian Mitchell"]
     },
     "cs281": {
@@ -250,6 +251,7 @@ A configuration can therefore look like:
       "course_info_url": "https://github.com/CS281-Arch-FA26/course-info",
       "course_name": "CS281",
       "repo_prefix": "cs281",
+      "repo_name_case": "lower",
       "instructors": ["Prof. Mitchell", "Prof. Jones"]
     }
   }
@@ -268,6 +270,7 @@ A configuration can therefore look like:
 | `course_info_url`    | URL inserted into each student’s initial README.               |
 | `course_name`        | Optional course label for repo descriptions and READMEs. Defaults to the upper-cased alias. |
 | `repo_prefix`        | Optional prefix for student repository names: `cs281` gives `cs281-jsmith42` (a `-` is added unless the prefix already ends in `-`, `_`, or `.`). Defaults to none. |
+| `repo_name_case`     | `lower` (default) or `preserve`. Controls the case of generated student repository names; see [Repository name case](#repository-name-case). |
 | `instructors`        | Optional list of names that sign `--message` notes, e.g. `["Dr. Brian Mitchell"]`. Defaults to “The <course_name> teaching team”. |
 
 `default_classroom` contains the classroom alias used when
@@ -312,6 +315,7 @@ A new classroom is created with obvious placeholder values:
   "course_info_url": "https://github.com/YOUR_GITHUB_ORGANIZATION/YOUR_COURSE_INFO_REPO",
   "course_name": "CS281",
   "repo_prefix": "",
+  "repo_name_case": "lower",
   "instructors": []
 }
 ```
@@ -647,7 +651,52 @@ cs281-jsmith42      (repo_prefix "cs281" or "cs281-")
 cs281_jsmith42      (repo_prefix "cs281_")
 ```
 
-`--repo NAME` overrides the name for one student.
+By default repository names are lowercase (`cs472-sudovoid1` for
+GitHub user `SudoVoid1`); the student's exact GitHub ID is always kept
+in the `github_id` property and used for their invitation. To keep the
+case instead, see [Repository name case](#repository-name-case).
+`--repo NAME` overrides the name for one student and is used exactly as
+typed.
+
+### Repository name case
+
+Generated repository names (`<repo_prefix><GitHub ID>`) are lowercased
+unless you ask otherwise. There are two ways to keep the case:
+
+- **Per classroom:** set `"repo_name_case": "preserve"` in
+  `config.json`. Every `student create` and `classroom import` for that
+  classroom then keeps the case.
+- **Per run:** add `--keep-case` to `student create` or
+  `classroom import`. This overrides `"lower"` for that one command.
+
+``` bash
+./mgc --apply student create --name "Jane Smith" --github JSmith42 --keep-case
+./mgc --apply classroom import roster.csv --keep-case
+```
+
+| `repo_prefix` | GitHub login | `lower` (default)  | `preserve` / `--keep-case` |
+|---------------|--------------|--------------------|----------------------------|
+| `CS281`       | `JSmith42`   | `cs281-jsmith42`   | `CS281-JSmith42`           |
+| (none)        | `SudoVoid1`  | `sudovoid1`        | `SudoVoid1`                |
+
+When case is kept, the GitHub ID part uses the login exactly as GitHub
+reports it, not as the student typed it in the roster, so `jsmith42`
+in the CSV still produces `CS281-JSmith42` if the account is
+`JSmith42`.
+
+GitHub treats repository names case-insensitively: `CS281-JSmith42` and
+`cs281-jsmith42` are the same repository and cannot both exist. The
+setting only changes how names look. Every lookup in `mgc` (import's
+existing-repository check, `student info`, `student find`, `--repair`)
+matches names case-insensitively, so mixing modes, switching the
+setting mid-term, or renaming a repository's case on GitHub does not
+cause duplicates or missed students. Changing the setting does not
+rename existing repositories.
+
+Prefer the config setting over the flag if you want preserved case
+consistently; the flag is for the occasional one-off. `./mgc doctor`
+and the import report header show which mode is active, e.g.
+`Repo names: cs281-<github-id> (lowercase)`.
 
 For a new repository, `mgc`:
 
@@ -778,10 +827,13 @@ Bob Baker,bbaker
 The file is checked for both columns before anything is sent to
 GitHub. `./mgc classroom import --help` lists the required columns.
 
-Each new repository is named `<repo_prefix>-<GitHub ID>` using the
+Each new repository is named `<repo_prefix><GitHub ID>` using the
 classroom’s `repo_prefix` (see [Classroom Settings](#classroom-settings)),
-or just the GitHub ID when no prefix is set. The report header shows the
-resolved pattern, e.g. `Repo names: cs472-<github-id>`.
+or just the GitHub ID when no prefix is set. Names are lowercase unless
+the classroom sets `"repo_name_case": "preserve"` or you pass
+`--keep-case` (see [Repository name case](#repository-name-case)). The
+report header shows the resolved pattern, e.g.
+`Repo names: cs472-<github-id> (lowercase)`.
 Running `classroom import` with no file prints a warning and usage.
 
 `-n`/`--number N` processes only the first N students, which is handy

@@ -51,6 +51,7 @@ func classroomCmd() *cobra.Command {
 			CourseInfoURL:     "https://github.com/YOUR_GITHUB_ORGANIZATION/YOUR_COURSE_INFO_REPO",
 			CourseName:        strings.ToUpper(alias),
 			RepoPrefix:        "",
+			RepoNameCase:      config.RepoNameCaseLower,
 			Instructors:       []string{},
 		}
 		if !apply {
@@ -59,6 +60,7 @@ func classroomCmd() *cobra.Command {
 			fmt.Printf("          course-info: %s\n", cl.CourseInfoRepo)
 			fmt.Printf("          course name: %s\n", cl.CourseName)
 			fmt.Printf("          repo prefix: %q (e.g. \"cs472\" names repos cs472-<github-id>)\n", cl.RepoPrefix)
+			fmt.Printf("          repo name case: %s (\"preserve\" keeps the prefix and GitHub ID case)\n", cl.RepoNameCase)
 			fmt.Printf("          instructors: [] (sign --message output; edit to add names)\n")
 			return nil
 		}

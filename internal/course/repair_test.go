@@ -293,3 +293,33 @@ func TestImportFindsRepoWithUndashedPrefix(t *testing.T) {
 		t.Errorf("header should show the resolved prefix:\n%s", out)
 	}
 }
+
+func TestImportLowercasesRepoNames(t *testing.T) {
+	s, f, out := prefixed(t, true)
+	s.C.RepoPrefix = "CS281"
+	newRepoRoutes(importFixture(f, `[]`).user("SudoVoid1"), "cs281-sudovoid1")
+	f.on("PUT", repoPath("cs281-sudovoid1", "collaborators/SudoVoid1"), `{}`)
+
+	sum, err := s.ImportStudents([]roster.Student{stu(2, "Lucas", "SudoVoid1")}, importMeta(), nil)
+	if err != nil || sum.Created != 1 {
+		t.Fatalf("sum %+v err %v\n%s", sum, err, out)
+	}
+	create, _ := f.find("POST", "orgs/"+org+"/repos")
+	if !contains(create.Fields, "name=cs281-sudovoid1") {
+		t.Errorf("repo name not lowercased: %v", create.Fields)
+	}
+	props, _ := f.find("PATCH", repoPath("cs281-sudovoid1", "properties/values"))
+	if got := decodeProps(t, props.Input)["github_id"]; got != "SudoVoid1" {
+		t.Errorf("github_id should keep GitHub's case, got %q", got)
+	}
+}
+
+func TestImportRecognizesEarlierMixedCaseRepo(t *testing.T) {
+	s, f, _ := prefixed(t, true)
+	s.C.RepoPrefix = "cs281"
+	importFixture(f, `[{"name":"cs281-SudoVoid1","html_url":"u/cs281-SudoVoid1"}]`)
+	sum, err := s.ImportStudents([]roster.Student{stu(2, "Lucas", "SudoVoid1")}, importMeta(), nil)
+	if err != nil || sum.Skipped != 1 || len(f.mutations()) != 0 {
+		t.Errorf("mixed-case repo from before should be skipped: sum %+v mutations %v", sum, f.mutations())
+	}
+}

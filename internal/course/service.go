@@ -29,6 +29,9 @@ type Service struct {
 	C     config.Classroom
 	Apply bool
 	Out   io.Writer
+	// KeepCase preserves repository-name case for this run (--keep-case),
+	// overriding a repo_name_case of "lower".
+	KeepCase bool
 }
 
 func New(c config.Classroom, apply bool) *Service {
@@ -484,8 +487,29 @@ func (s *Service) CreateStudentRepo(name, github, repoName string) (string, erro
 }
 
 // RepoName is the default repository name for a student: the classroom's
-// repo_prefix followed by their GitHub login.
-func (s *Service) RepoName(login string) string { return s.repoPrefix() + login }
+// repo_prefix followed by their GitHub login. It is lowercased unless the
+// classroom sets repo_name_case to "preserve" or --keep-case is given.
+// GitHub treats repository names case-insensitively, so every lookup in
+// mgc compares names case-insensitively and works either way. The login
+// always keeps its exact case in the github_id property.
+func (s *Service) RepoName(login string) string {
+	if s.keepCase() {
+		return s.repoPrefix() + login
+	}
+	return strings.ToLower(s.repoPrefix() + login)
+}
+
+func (s *Service) keepCase() bool {
+	return s.KeepCase || s.C.RepoNameCase == config.RepoNameCasePreserve
+}
+
+// repoNamePattern describes generated names for status output.
+func (s *Service) repoNamePattern() string {
+	if s.keepCase() {
+		return s.repoPrefix() + "<github-id> (case preserved)"
+	}
+	return strings.ToLower(s.repoPrefix()) + "<github-id> (lowercase)"
+}
 
 // repoPrefix is the configured repo_prefix with its separator, e.g. "cs472-".
 func (s *Service) repoPrefix() string { return config.NormalizeRepoPrefix(s.C.RepoPrefix) }
@@ -910,6 +934,6 @@ func (s *Service) Doctor(active string) error {
 		s.printf("Grader team:     NOT CREATED (%s)\n", s.C.GraderTeam)
 	}
 	s.printf("Course info URL: %s\n", s.C.CourseInfoURL)
-	s.printf("Repo names:      %s<github-id>\n", s.repoPrefix())
+	s.printf("Repo names:      %s\n", s.repoNamePattern())
 	return nil
 }
