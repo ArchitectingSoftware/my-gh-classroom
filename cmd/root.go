@@ -33,8 +33,8 @@ var rootCmd = &cobra.Command{
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-		// version works anywhere, with or without a config file.
-		if cmd.Name() == "version" {
+		// version and init work anywhere, with or without a config file.
+		if cmd.Name() == "version" || cmd.Name() == "init" {
 			return nil
 		}
 		var err error
@@ -116,10 +116,10 @@ func rejectLegacyArgs(in []string) error {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "Path to config.json (default: $MGC_CONFIG, ./config.json, or ~/.config/mgc/config.json)")
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "Path to config.json (default: $MGC_CONFIG, ./config.json, ~/.mgc/config.json, or the OS config dir)")
 	rootCmd.PersistentFlags().BoolVarP(&apply, "apply", "a", false, "Actually perform a mutating operation; otherwise mutating commands are dry-run")
 	rootCmd.PersistentFlags().StringVarP(&classroomAlias, "classroom", "c", "", "Classroom alias to use; defaults to configured default classroom")
-	rootCmd.AddCommand(doctorCmd(), teamCmd(), studentCmd(), propertiesCmd(), classroomCmd(), versionCmd())
+	rootCmd.AddCommand(initCmd(), doctorCmd(), teamCmd(), studentCmd(), propertiesCmd(), classroomCmd(), versionCmd())
 	v, _, _, _ := buildVersion()
 	rootCmd.Version = v
 	rootCmd.SetVersionTemplate("mgc {{.Version}}\n")

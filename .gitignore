@@ -40,3 +40,6 @@ go.work.sum
 
 #executable files
 mgc
+
+# Personal config: never commit. See config.example.json or run `mgc init`.
+/config.json

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -66,8 +67,13 @@ var repoPrefixRE = regexp.MustCompile(`^[A-Za-z0-9._-]{0,60}$`)
 //  1. explicit path (the --config flag)
 //  2. $MGC_CONFIG
 //  3. ./config.json, if it exists
-//  4. <user config dir>/mgc/config.json (e.g. ~/.config/mgc/config.json on
-//     Linux, ~/Library/Application Support/mgc/config.json on macOS)
+//  4. ~/.mgc/config.json, if it exists
+//  5. <user config dir>/mgc/config.json, if it exists (e.g.
+//     ~/Library/Application Support/mgc/config.json on macOS,
+//     ~/.config/mgc/config.json on Linux)
+//
+// When none exists it returns ~/.mgc/config.json, the recommended
+// location, so error messages point there.
 func ResolvePath(explicit string) string {
 	if explicit != "" {
 		return explicit
@@ -75,13 +81,40 @@ func ResolvePath(explicit string) string {
 	if env := os.Getenv("MGC_CONFIG"); env != "" {
 		return env
 	}
-	if _, err := os.Stat("config.json"); err == nil {
-		return "config.json"
+	if exists(LocalPath) {
+		return LocalPath
+	}
+	home := HomePath()
+	if home != "" && exists(home) {
+		return home
 	}
 	if dir, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(dir, "mgc", "config.json")
+		if p := filepath.Join(dir, "mgc", "config.json"); exists(p) {
+			return p
+		}
 	}
-	return "config.json"
+	if home != "" {
+		return home
+	}
+	return LocalPath
+}
+
+// LocalPath is the per-directory config file, highest precedence after
+// --config and $MGC_CONFIG.
+const LocalPath = "config.json"
+
+// HomePath is ~/.mgc/config.json, or "" if the home directory is unknown.
+func HomePath() string {
+	h, err := os.UserHomeDir()
+	if err != nil || h == "" {
+		return ""
+	}
+	return filepath.Join(h, ".mgc", "config.json")
+}
+
+func exists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 func Load(path string) (Config, error) {
@@ -93,7 +126,7 @@ func Load(path string) (Config, error) {
 	data, err := os.ReadFile(abs)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return Config{}, fmt.Errorf("config file not found: %s (use --config, set MGC_CONFIG, or create ./config.json)", abs)
+			return Config{}, fmt.Errorf("config file not found: %s\ncreate one with 'mgc init' (./config.json) or 'mgc init --home' (~/.mgc/config.json), or point to one with --config or $MGC_CONFIG", abs)
 		}
 		return Config{}, fmt.Errorf("could not read config: %w", err)
 	}
@@ -110,16 +143,12 @@ func Load(path string) (Config, error) {
 	return c, nil
 }
 
-func Save(path string, c Config) error {
-	path = ResolvePath(path)
+// Encode renders a config as it is written to disk.
+func Encode(c Config) ([]byte, error) {
 	// Write optional settings explicitly (lists as [] rather than null,
 	// repo_name_case as its default) so they stay visible and easy to
 	// change. Work on a copy so the caller's config is not modified.
 	classrooms := make(map[string]Classroom, len(c.Classrooms))
-	for alias, cl := range c.Classrooms {
-		classrooms[alias] = cl
-	}
-	c.Classrooms = classrooms
 	for alias, cl := range c.Classrooms {
 		if cl.Instructors == nil {
 			cl.Instructors = []string{}
@@ -127,20 +156,86 @@ func Save(path string, c Config) error {
 		if cl.RepoNameCase == "" {
 			cl.RepoNameCase = RepoNameCaseLower
 		}
-		c.Classrooms[alias] = cl
+		classrooms[alias] = cl
+	}
+	c.Classrooms = classrooms
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("could not encode config: %w", err)
+	}
+	return append(data, '\n'), nil
+}
+
+func Save(path string, c Config) error {
+	path = ResolvePath(path)
+	data, err := Encode(c)
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("could not create config directory: %w", err)
 	}
-	data, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return fmt.Errorf("could not encode config: %w", err)
-	}
-	data = append(data, '\n')
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("could not write config: %w", err)
 	}
 	return nil
+}
+
+// ErrExists is returned by Create when the file is already there.
+var ErrExists = errors.New("config file already exists")
+
+// Create writes a new config file at path, creating its directory. It
+// never overwrites: if the file exists it returns ErrExists.
+func Create(path string, c Config) error {
+	data, err := Encode(c)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("could not create config directory: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return ErrExists
+		}
+		return fmt.Errorf("could not write config: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return fmt.Errorf("could not write config: %w", err)
+	}
+	return f.Close()
+}
+
+// NewClassroom returns a classroom with obvious placeholder values for
+// the user to replace.
+func NewClassroom(alias string) Classroom {
+	return Classroom{
+		Organization:      "YOUR_GITHUB_ORGANIZATION",
+		GraderTeam:        "graders",
+		GraderPermission:  DefaultGraderPermission,
+		StudentPermission: DefaultStudentPermission,
+		CourseInfoRepo:    "YOUR_COURSE_INFO_REPO",
+		CourseInfoURL:     "https://github.com/YOUR_GITHUB_ORGANIZATION/YOUR_COURSE_INFO_REPO",
+		CourseName:        strings.ToUpper(alias),
+		RepoPrefix:        "",
+		RepoNameCase:      RepoNameCaseLower,
+		Instructors:       []string{},
+	}
+}
+
+// ExampleAlias is the classroom alias used when mgc init is given none;
+// config.example.json is Scaffold(ExampleAlias).
+const ExampleAlias = "cs101"
+
+// Scaffold returns a starter config with one placeholder classroom,
+// which is also the default classroom.
+func Scaffold(alias string) Config {
+	return Config{
+		DefaultClassroom: alias,
+		Classrooms:       map[string]Classroom{alias: NewClassroom(alias)},
+	}
 }
 
 func (c Config) Classroom(alias string) (Classroom, error) {

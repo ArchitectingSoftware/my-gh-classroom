@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -163,25 +164,78 @@ func TestResolvePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chdir(wd) })
+	home := filepath.Join(dir, "home")
+	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
-	t.Setenv("HOME", filepath.Join(dir, "home"))
-
 	t.Setenv("MGC_CONFIG", "")
+	homeCfg := filepath.Join(home, ".mgc", "config.json")
+	osCfg, _ := os.UserConfigDir()
+	osCfg = filepath.Join(osCfg, "mgc", "config.json")
+	write := func(p string) {
+		t.Helper()
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	if got := ResolvePath("/explicit.json"); got != "/explicit.json" {
 		t.Errorf("explicit: %q", got)
 	}
-	if got := ResolvePath(""); !strings.HasSuffix(got, filepath.Join("mgc", "config.json")) {
-		t.Errorf("user config dir fallback: %q", got)
+	if got := ResolvePath(""); got != homeCfg {
+		t.Errorf("nothing exists: got %q, want %q", got, homeCfg)
 	}
-
-	os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o600)
+	write(osCfg)
+	if got := ResolvePath(""); got != osCfg {
+		t.Errorf("OS config dir: got %q, want %q", got, osCfg)
+	}
+	write(homeCfg)
+	if got := ResolvePath(""); got != homeCfg {
+		t.Errorf("~/.mgc should beat the OS config dir: got %q", got)
+	}
+	write(filepath.Join(dir, "config.json"))
 	if got := ResolvePath(""); got != "config.json" {
-		t.Errorf("local config.json: %q", got)
+		t.Errorf("./config.json should beat ~/.mgc: got %q", got)
 	}
-
 	t.Setenv("MGC_CONFIG", "/env.json")
 	if got := ResolvePath(""); got != "/env.json" {
 		t.Errorf("env: %q", got)
+	}
+}
+
+func TestCreateNeverOverwrites(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "nested", "config.json")
+	if err := Create(p, Scaffold("cs472")); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("scaffold should load and validate: %v", err)
+	}
+	if c.DefaultClassroom != "cs472" || c.Classrooms["cs472"].CourseName != "CS472" {
+		t.Errorf("unexpected scaffold: %+v", c)
+	}
+	before, _ := os.ReadFile(p)
+	if err := Create(p, Scaffold("other")); !errors.Is(err, ErrExists) {
+		t.Fatalf("second Create: err = %v, want ErrExists", err)
+	}
+	if after, _ := os.ReadFile(p); string(after) != string(before) {
+		t.Error("existing file was modified")
+	}
+}
+
+// config.example.json must be exactly what `mgc init` generates.
+func TestExampleConfigMatchesScaffold(t *testing.T) {
+	want, err := Encode(Scaffold(ExampleAlias))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join("..", "..", "config.example.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("config.example.json is out of date; regenerate it with:\n  rm config.example.json && go run . --apply --config config.example.json init\nwant:\n%s", want)
 	}
 }
 

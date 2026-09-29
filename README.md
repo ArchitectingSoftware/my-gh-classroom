@@ -123,6 +123,71 @@ gh auth status
 `mgc` does not maintain a separate GitHub token. Authentication and
 credential storage are handled by `gh`.
 
+## Install
+
+### Download a release (no Go needed)
+
+Prebuilt binaries for macOS, Linux, and Windows (amd64 and arm64) are on
+the [Releases page](https://github.com/ArchitectingSoftware/my-gh-classroom/releases).
+Each release has one archive per platform plus a checksums file:
+
+``` text
+mgc_1.0.0_darwin_arm64.tar.gz     macOS, Apple silicon
+mgc_1.0.0_darwin_amd64.tar.gz     macOS, Intel
+mgc_1.0.0_linux_amd64.tar.gz      Linux x86-64
+mgc_1.0.0_linux_arm64.tar.gz      Linux ARM64
+mgc_1.0.0_windows_amd64.zip       Windows x86-64
+mgc_1.0.0_windows_arm64.zip       Windows ARM64
+mgc_1.0.0_checksums.txt           SHA-256 of every archive
+```
+
+With `gh` (which `mgc` needs anyway), download, verify, and install on
+macOS or Linux:
+
+``` bash
+gh release download --repo ArchitectingSoftware/my-gh-classroom \
+  --pattern '*darwin_arm64.tar.gz' --pattern '*checksums.txt'
+shasum -a 256 -c --ignore-missing mgc_*_checksums.txt   # must print OK
+tar xzf mgc_*_darwin_arm64.tar.gz
+sudo mv mgc_*_darwin_arm64/mgc /usr/local/bin/
+mgc version
+```
+
+Change the pattern for your platform (`uname -sm` tells you which). On
+Windows, unzip the archive and put `mgc.exe` somewhere on your `PATH`;
+verify it with `Get-FileHash mgc_*_windows_amd64.zip` against the
+checksums file.
+
+**macOS:** the binaries are not signed by Apple, so a binary downloaded
+with a browser is blocked the first time you run it ("cannot be opened
+because the developer cannot be verified"). Clear the quarantine flag
+once:
+
+``` bash
+xattr -d com.apple.quarantine /usr/local/bin/mgc
+```
+
+Files downloaded with `gh` or `curl` are not quarantined and run
+directly.
+
+### With Go
+
+``` bash
+go install github.com/ArchitectingSoftware/my-gh-classroom@latest
+```
+
+This installs to `$(go env GOPATH)/bin` as `my-gh-classroom`; rename it
+to `mgc` if you like. Or clone the repository and see [Build](#build).
+
+### First run
+
+Create your config in `~/.mgc` and fill in the placeholders (see
+[Creating a config](#creating-a-config)):
+
+``` bash
+mgc --apply init cs472 --home
+```
+
 ## Build
 
 Download dependencies:
@@ -177,25 +242,88 @@ The tests use a fake GitHub CLI, so they need no network access or
 ./mgc --version     # just the version
 ```
 
-Versions come from git tags. `make build`, `make install`, and
-`make release` stamp the binary with `git describe`, so a build of a
-tagged commit reports e.g. `v1.0.0`, and later commits report e.g.
-`v1.0.0-3-gabc1234` (with `-dirty` for uncommitted changes).
-`make version` prints the version a build would get. To cut a release:
-
-``` bash
-git tag v1.0.0
-git push origin v1.0.0
-make release        # binaries in dist/, named with the version
-```
+Versions come from git tags. `make build` and `make install` stamp the
+binary with `git describe`, so a build of a tagged commit reports e.g.
+`v1.0.0`, and later commits report e.g. `v1.0.0-3-gabc1234` (with
+`-dirty` for uncommitted changes). `make version` prints the version a
+build would get.
 
 `mgc version` also shows the exact commit the binary was built from,
 marked `(modified)` for uncommitted changes, which is the first thing to
 ask for in a bug report. It works without a `config.json`.
 
+### Cutting a release
+
+Releases are built with the Makefile and published with `gh`. The
+targets:
+
+| Target         | What it does |
+|----------------|--------------|
+| `make dist`    | Cross-compiles all platforms into `dist/` as archives plus a checksums file, for **any** version. Use it to try a build; nothing is published. |
+| `make release` | Same as `dist`, but only after `check-release`, `vet`, and `test` pass. |
+| `make publish` | `make release`, then creates the GitHub release for the tag and uploads `dist/`. |
+
+`make release` refuses to build unless:
+
+- HEAD has a tag, and `VERSION` (defaults to `git describe`) is one of
+  HEAD's tags;
+- the tag is semver with a leading `v`: `v1.2.3`, or a prerelease such
+  as `v1.2.3-rc.1`;
+- the working tree is clean, including untracked files that are not
+  gitignored (otherwise the binary reports itself as modified);
+- `go.mod`/`go.sum` are tidy.
+
+Release binaries are static (`CGO_ENABLED=0`), built with `-trimpath`
+so no local paths are embedded, and stripped (`-s -w`). Each archive
+contains `mgc` (`mgc.exe` on Windows), this README, and the LICENSE.
+
+To publish:
+
+``` bash
+make test                                 # make sure main is good
+git tag -a v1.0.0 -m "v1.0.0"
+git push origin v1.0.0                    # the tag must be on GitHub first
+make publish
+```
+
+`make publish` stops if a release for the tag already exists. Release
+notes are generated from the commits and pull requests since the
+previous release; edit them on GitHub afterward if you like. Tags with
+a `-` (e.g. `v1.1.0-rc.1`) are published as prereleases, so they do not
+become "Latest".
+
+To fix a bad release, delete it (`gh release delete v1.0.0`), fix the
+problem, and release a new patch version rather than moving the tag;
+anyone who downloaded the old one would otherwise have a checksum that
+no longer matches.
+
 ## Configuration
 
 `mgc` supports multiple classrooms in one `config.json`.
+
+### Creating a config
+
+`mgc init` writes a starter config with one placeholder classroom:
+
+``` bash
+./mgc init cs472                   # preview the file
+./mgc --apply init cs472           # write ./config.json
+./mgc --apply init cs472 --home    # write ~/.mgc/config.json instead
+```
+
+The alias (`cs472` here) names the classroom and makes it the default;
+without one it is `cs101`. Replace the `YOUR_*` placeholders, then run
+`./mgc classroom verify` and `./mgc doctor`. Add more classrooms later
+with [`classroom create`](#create-a-classroom).
+
+`mgc init` never overwrites. If the file already exists it stops and
+tells you to rename or delete it first. It also warns when another
+config file with higher precedence (below) would be used instead of
+the new one.
+
+The repository ships [`config.example.json`](config.example.json),
+which is exactly what `mgc init` generates. `config.json` itself is
+gitignored so a personal config is never committed.
 
 ### Config file location
 
@@ -204,10 +332,15 @@ ask for in a bug report. It works without a `config.json`.
 1. `--config PATH`
 2. the `MGC_CONFIG` environment variable
 3. `./config.json`, if it exists in the current directory
-4. the per-user config directory: `~/Library/Application Support/mgc/config.json`
-   on macOS, `~/.config/mgc/config.json` on Linux
+4. `~/.mgc/config.json`, if it exists
+5. the OS config directory, if it exists:
+   `~/Library/Application Support/mgc/config.json` on macOS,
+   `~/.config/mgc/config.json` on Linux
 
-Options 2 and 4 let an installed `mgc` run from any directory.
+`~/.mgc/config.json` is the recommended home for your config: an
+installed `mgc` then works from any directory. A `./config.json` in the
+current directory overrides it, which is handy for testing. `./mgc
+doctor` prints the config file it is using.
 
 A **classroom alias** is a short local name used by the CLI. It does not
 have to match the GitHub organization name.
@@ -1080,6 +1213,7 @@ the official GitHub CLI.
 │   ├── classroom.go
 │   ├── import.go        classroom import (CSV roster)
 │   ├── doctor.go
+│   ├── init.go          mgc init (starter config)
 │   ├── properties.go
 │   ├── root.go
 │   ├── student.go
@@ -1090,8 +1224,9 @@ the official GitHub CLI.
 │   ├── course/          classroom operations (provisioning, search, teams)
 │   └── gh/              thin wrapper around the `gh` CLI
 ├── main.go
-├── config.json
+├── config.example.json  starter config, identical to `mgc init` output
 ├── go.mod
+├── LICENSE
 ├── Makefile
 └── README.md
 ```
@@ -1130,3 +1265,7 @@ touching repository contents. Review the dry run first.
 
 `student create-batch` has been removed; use `classroom import`, with
 `--name-column`/`--github-column` if your CSV headers differ.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

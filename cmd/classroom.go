@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"net/url"
-	"strings"
 
 	"github.com/ArchitectingSoftware/my-gh-classroom/internal/config"
 	"github.com/ArchitectingSoftware/my-gh-classroom/internal/gh"
@@ -42,18 +41,7 @@ func classroomCmd() *cobra.Command {
 		if err := config.ValidateClassroom(alias, config.Classroom{Organization: "placeholder", GraderTeam: "graders", GraderPermission: "push", StudentPermission: "push", CourseInfoRepo: "placeholder", CourseInfoURL: "https://github.com/placeholder/placeholder"}); err != nil {
 			return err
 		}
-		cl := config.Classroom{
-			Organization:      "YOUR_GITHUB_ORGANIZATION",
-			GraderTeam:        "graders",
-			GraderPermission:  "push",
-			StudentPermission: "push",
-			CourseInfoRepo:    "YOUR_COURSE_INFO_REPO",
-			CourseInfoURL:     "https://github.com/YOUR_GITHUB_ORGANIZATION/YOUR_COURSE_INFO_REPO",
-			CourseName:        strings.ToUpper(alias),
-			RepoPrefix:        "",
-			RepoNameCase:      config.RepoNameCaseLower,
-			Instructors:       []string{},
-		}
+		cl := config.NewClassroom(alias)
 		if !apply {
 			fmt.Printf("DRY RUN   would add classroom '%s' to %s\n", alias, configPath)
 			fmt.Printf("          organization: %s\n", cl.Organization)

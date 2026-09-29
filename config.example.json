@@ -1,0 +1,17 @@
+{
+  "default_classroom": "cs101",
+  "classrooms": {
+    "cs101": {
+      "organization": "YOUR_GITHUB_ORGANIZATION",
+      "grader_team": "graders",
+      "grader_permission": "push",
+      "student_permission": "push",
+      "course_info_repo": "YOUR_COURSE_INFO_REPO",
+      "course_info_url": "https://github.com/YOUR_GITHUB_ORGANIZATION/YOUR_COURSE_INFO_REPO",
+      "course_name": "CS101",
+      "repo_prefix": "",
+      "repo_name_case": "lower",
+      "instructors": []
+    }
+  }
+}

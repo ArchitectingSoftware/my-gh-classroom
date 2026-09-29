@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -910,7 +911,7 @@ func (s *Service) StudentFind(q string) error {
 
 // ---------------------------------------------------------------- doctor
 
-func (s *Service) Doctor(active string) error {
+func (s *Service) Doctor(active, configFile string) error {
 	if _, err := s.GH.Run("auth", "status"); err != nil {
 		return err
 	}
@@ -918,7 +919,10 @@ func (s *Service) Doctor(active string) error {
 	if err := s.json(&u, "api", "user"); err != nil {
 		return err
 	}
-	s.printf("mgc doctor\n\nClassroom:       %s\nOrganization:    %s\nAuthenticated:   OK (%s)\n", active, s.C.Organization, str(u["login"]))
+	if abs, err := filepath.Abs(configFile); err == nil {
+		configFile = abs
+	}
+	s.printf("mgc doctor\n\nConfig file:     %s\nClassroom:       %s\nOrganization:    %s\nAuthenticated:   OK (%s)\n", configFile, active, s.C.Organization, str(u["login"]))
 	var org map[string]any
 	if err := s.json(&org, "api", fmt.Sprintf("orgs/%s", s.C.Organization)); err != nil {
 		return err
