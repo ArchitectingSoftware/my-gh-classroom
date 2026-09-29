@@ -20,6 +20,10 @@ GitHub API access. It does not store GitHub credentials.
 > by default**. Pass `--apply` (or `-a`) explicitly to perform a
 > mutation.
 
+**New to mgc?** Start with [GETTING_STARTED.md](GETTING_STARTED.md), a
+step-by-step guide to setting up a course. This README is the full
+reference.
+
 ## Features
 
 - Manage multiple classrooms from one installation.
@@ -275,7 +279,8 @@ targets:
 
 Release binaries are static (`CGO_ENABLED=0`), built with `-trimpath`
 so no local paths are embedded, and stripped (`-s -w`). Each archive
-contains `mgc` (`mgc.exe` on Windows), this README, and the LICENSE.
+contains `mgc` (`mgc.exe` on Windows), this README, GETTING_STARTED.md,
+and the LICENSE.
 
 To publish:
 
@@ -1225,6 +1230,7 @@ the official GitHub CLI.
 │   └── gh/              thin wrapper around the `gh` CLI
 ├── main.go
 ├── config.example.json  starter config, identical to `mgc init` output
+├── GETTING_STARTED.md step-by-step setup guide
 ├── go.mod
 ├── LICENSE
 ├── Makefile
